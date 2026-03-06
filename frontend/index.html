@@ -1,0 +1,1426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book Agent — Editor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #1d1d1f;
+      color: white;
+      padding: 14px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { font-size: 17px; font-weight: 600; }
+    #admin-btn {
+      background: none;
+      border: 1px solid #444;
+      color: #86868b;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+    #admin-btn:hover { border-color: #86868b; color: white; }
+    #admin-btn.unlocked { border-color: #30d158; color: #30d158; }
+
+    /* ── Main ── */
+    main {
+      max-width: 820px;
+      margin: 32px auto;
+      padding: 0 24px 80px;
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 22px 24px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card h2 {
+      font-size: 10px;
+      font-weight: 700;
+      color: #86868b;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 16px;
+    }
+
+    /* ── Drop zone ── */
+    .drop-zone {
+      border: 2px dashed #d2d2d7;
+      border-radius: 10px;
+      padding: 44px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: #86868b;
+    }
+    .drop-zone:hover, .drop-zone.over {
+      border-color: #0071e3;
+      background: #f0f7ff;
+      color: #0071e3;
+    }
+    .dz-icon  { font-size: 36px; margin-bottom: 10px; }
+    .dz-label { font-size: 15px; font-weight: 500; margin-bottom: 5px; }
+    .dz-hint  { font-size: 13px; }
+
+    /* ── File pill ── */
+    .file-pill {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: #f0f7ff;
+      border: 1px solid #cce0ff;
+      border-radius: 10px;
+    }
+    .fp-icon { font-size: 26px; }
+    .fp-name { font-size: 14px; font-weight: 500; }
+    .fp-meta { font-size: 12px; color: #86868b; margin-top: 2px; }
+    .fp-remove {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: #86868b;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-family: inherit;
+    }
+    .fp-remove:hover { background: #fee2e2; color: #dc2626; }
+
+    /* ── Form ── */
+    .form-row  { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group:last-child { margin-bottom: 0; }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #86868b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .form-group input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d2d2d7;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input[type="text"]:focus { border-color: #0071e3; }
+    .form-group input[type="file"] { font-size: 13px; color: #86868b; }
+    .parsed-hint {
+      margin-top: 12px;
+      font-size: 13px;
+      color: #86868b;
+      padding: 8px 12px;
+      background: #f5f5f7;
+      border-radius: 6px;
+    }
+
+    /* ── Languages ── */
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .section-header span { font-size: 13px; color: #86868b; }
+    .text-btn {
+      background: none; border: none;
+      color: #0071e3; font-size: 13px;
+      cursor: pointer; padding: 0; font-family: inherit;
+    }
+    .text-btn:hover { text-decoration: underline; }
+
+    .lang-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .lang-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1.5px solid #d2d2d7;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+      font-size: 14px;
+    }
+    .lang-check:hover { border-color: #0071e3; background: #f0f7ff; }
+    .lang-check input { accent-color: #0071e3; width: 15px; height: 15px; }
+    .lc-flag { font-size: 18px; }
+
+    /* ── Image style ── */
+    .style-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .style-opt {
+      padding: 14px 8px;
+      border: 2px solid #d2d2d7;
+      border-radius: 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .style-opt:hover { border-color: #0071e3; }
+    .style-opt.selected { border-color: #0071e3; background: #f0f7ff; }
+    .style-opt input { display: none; }
+    .so-icon { font-size: 26px; margin-bottom: 6px; }
+    .so-name { font-size: 13px; font-weight: 500; }
+
+    /* ── Run button ── */
+    #run-btn {
+      width: 100%;
+      padding: 15px;
+      background: #0071e3;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.2s;
+      margin-bottom: 12px;
+    }
+    #run-btn:hover:not(:disabled) { background: #0062c4; }
+    #run-btn:disabled { background: #a8c8f0; cursor: not-allowed; }
+
+    /* ── Progress ── */
+    .progress-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #f5f5f7;
+    }
+    .progress-step:last-child { border-bottom: none; }
+    .ps-icon   { width: 22px; font-size: 16px; text-align: center; flex-shrink: 0; margin-top: 1px; }
+    .ps-label  { font-size: 14px; font-weight: 500; }
+    .ps-detail { font-size: 12px; color: #86868b; margin-top: 2px; }
+
+    /* ── Results ── */
+    .results-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .rs-stat {
+      background: #f5f5f7;
+      border-radius: 10px;
+      padding: 14px;
+      text-align: center;
+    }
+    .rs-stat .rs-num { font-size: 28px; font-weight: 700; color: #0071e3; }
+    .rs-stat .rs-label { font-size: 12px; color: #86868b; margin-top: 4px; }
+    .results-actions { display: flex; gap: 10px; margin-top: 4px; }
+    .results-actions .btn-primary  { flex: 1; padding: 13px; }
+    .results-actions .btn-secondary { flex: 1; padding: 13px; }
+
+    /* ═══════════════════════════════════════════════════
+       ADMIN OVERLAY
+    ═══════════════════════════════════════════════════ */
+    #admin-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .admin-panel {
+      background: white;
+      border-radius: 16px;
+      padding: 32px;
+      width: 100%;
+      max-width: 500px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+      animation: slideUp 0.25s ease;
+    }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    .admin-panel h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .admin-panel .sub {
+      font-size: 13px;
+      color: #86868b;
+      margin-bottom: 24px;
+    }
+
+    /* Auth form */
+    .auth-row {
+      display: flex;
+      gap: 10px;
+    }
+    .auth-row input[type="password"] {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1.5px solid #d2d2d7;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .auth-row input[type="password"]:focus { border-color: #0071e3; }
+    .auth-row input.error { border-color: #dc2626; }
+    .auth-err {
+      font-size: 12px;
+      color: #dc2626;
+      margin-top: 8px;
+      min-height: 16px;
+    }
+
+    /* Provider list */
+    .provider-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+    .provider-opt {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 2px solid #d2d2d7;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .provider-opt:hover:not(.off) { border-color: #0071e3; background: #f0f7ff; }
+    .provider-opt.selected { border-color: #0071e3; background: #f0f7ff; }
+    .provider-opt.off { opacity: 0.5; cursor: not-allowed; }
+    .provider-opt input[type="radio"] { accent-color: #0071e3; width: 16px; height: 16px; }
+    .po-icon { font-size: 22px; }
+    .po-info { flex: 1; }
+    .po-name { font-size: 14px; font-weight: 600; }
+    .po-desc { font-size: 12px; color: #86868b; margin-top: 1px; }
+
+    /* Keys */
+    .key-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 11px 0;
+      border-bottom: 1px solid #f5f5f7;
+      gap: 12px;
+    }
+    .key-row:last-child { border-bottom: none; }
+    .kr-name { font-size: 13px; font-weight: 600; font-family: monospace; }
+    .kr-desc { font-size: 12px; color: #86868b; margin-top: 2px; }
+    .kr-cmd  { font-size: 11px; color: #0071e3; font-family: monospace; margin-top: 3px; }
+
+    /* Badges */
+    .badge {
+      font-size: 11px; font-weight: 700;
+      padding: 3px 8px; border-radius: 20px;
+      white-space: nowrap;
+    }
+    .b-ok   { background: #dcfce7; color: #166534; }
+    .b-miss { background: #fee2e2; color: #991b1b; }
+    .b-soon { background: #f1f5f9; color: #64748b; }
+
+    /* Admin buttons row */
+    .admin-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .btn-primary {
+      flex: 1;
+      padding: 11px;
+      background: #0071e3;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.2s;
+    }
+    .btn-primary:hover { background: #0062c4; }
+    .btn-secondary {
+      padding: 11px 18px;
+      background: none;
+      color: #86868b;
+      border: 1px solid #d2d2d7;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .btn-secondary:hover { border-color: #86868b; color: #1d1d1f; }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #f0f0f5;
+      margin: 20px 0;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: #1d1d1f;
+      color: white;
+      padding: 11px 18px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      transform: translateY(80px);
+      transition: transform 0.3s ease;
+      z-index: 200;
+    }
+    .toast.show { transform: translateY(0); }
+
+    /* ═══════════════════════════════════════════════════
+       LOGIN OVERLAY
+    ═══════════════════════════════════════════════════ */
+    #login-overlay {
+      position: fixed;
+      inset: 0;
+      background: #f5f5f7;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .login-panel {
+      background: white;
+      border-radius: 20px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+      text-align: center;
+    }
+    .login-logo { font-size: 48px; margin-bottom: 12px; }
+    .login-panel h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .login-panel .sub { font-size: 14px; color: #86868b; margin-bottom: 28px; }
+
+    /* Logout button */
+    #logout-btn {
+      background: none;
+      border: 1px solid #444;
+      color: #86868b;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+      display: none;
+    }
+    #logout-btn:hover { border-color: #dc2626; color: #dc2626; }
+    #logout-btn.visible { display: inline-block; }
+
+    /* Utils */
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header>
+  <h1>📚 Book Agent</h1>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button id="logout-btn">Sign out</button>
+    <button id="admin-btn">⚙️ Admin</button>
+  </div>
+</header>
+
+<!-- ═══ MAIN EDITOR ═══ -->
+<main>
+
+  <!-- Step 1: Upload -->
+  <div class="card" id="card-upload">
+    <h2>Step 1 — Book File</h2>
+    <div class="drop-zone" id="drop-zone">
+      <div class="dz-icon">📂</div>
+      <div class="dz-label">Drop EPUB or TXT here</div>
+      <div class="dz-hint">or click to browse</div>
+    </div>
+    <div class="file-pill" id="file-pill" hidden>
+      <span class="fp-icon" id="fp-icon"></span>
+      <div>
+        <div class="fp-name" id="fp-name"></div>
+        <div class="fp-meta" id="fp-meta"></div>
+      </div>
+      <button class="fp-remove" id="fp-remove">Remove</button>
+    </div>
+    <input type="file" id="file-input" accept=".epub,.txt" hidden>
+  </div>
+
+  <!-- Step 2: Book Info -->
+  <div class="card" id="card-info" hidden>
+    <h2>Step 2 — Book Info</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Title</label>
+        <input type="text" id="book-title" placeholder="Book title">
+      </div>
+      <div class="form-group">
+        <label>Author</label>
+        <input type="text" id="book-author" placeholder="Author name">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Cover image (optional)</label>
+      <input type="file" id="cover-input" accept="image/*">
+    </div>
+    <div class="parsed-hint" id="parsed-hint"></div>
+  </div>
+
+  <!-- Step 3: Languages -->
+  <div class="card" id="card-langs" hidden>
+    <h2>Step 3 — Languages</h2>
+    <div class="section-header">
+      <span>Select target languages for translation</span>
+      <button class="text-btn" id="toggle-all-langs">Select all</button>
+    </div>
+    <div class="lang-grid">
+      <label class="lang-check"><input type="checkbox" name="lang" value="uk" checked><span class="lc-flag">🇺🇦</span>Ukrainian</label>
+      <label class="lang-check"><input type="checkbox" name="lang" value="ru"><span class="lc-flag">🇷🇺</span>Russian</label>
+      <label class="lang-check"><input type="checkbox" name="lang" value="pl"><span class="lc-flag">🇵🇱</span>Polish</label>
+      <label class="lang-check"><input type="checkbox" name="lang" value="de"><span class="lc-flag">🇩🇪</span>German</label>
+      <label class="lang-check"><input type="checkbox" name="lang" value="es"><span class="lc-flag">🇪🇸</span>Spanish</label>
+      <label class="lang-check"><input type="checkbox" name="lang" value="fr"><span class="lc-flag">🇫🇷</span>French</label>
+      <label class="lang-check"><input type="checkbox" name="lang" value="it"><span class="lc-flag">🇮🇹</span>Italian</label>
+      <label class="lang-check"><input type="checkbox" name="lang" value="pt"><span class="lc-flag">🇵🇹</span>Portuguese</label>
+      <label class="lang-check"><input type="checkbox" name="lang" value="cz"><span class="lc-flag">🇨🇿</span>Czech</label>
+    </div>
+  </div>
+
+  <!-- Step 4: Options -->
+  <div class="card" id="card-options" hidden>
+    <h2>Step 4 — Chapter Images (optional)</h2>
+    <div class="style-grid">
+      <label class="style-opt selected" data-val="none">
+        <input type="radio" name="img-style" value="none" checked>
+        <div class="so-icon">⬜</div><div class="so-name">No images</div>
+      </label>
+      <label class="style-opt" data-val="watercolor">
+        <input type="radio" name="img-style" value="watercolor">
+        <div class="so-icon">🎨</div><div class="so-name">Watercolor</div>
+      </label>
+      <label class="style-opt" data-val="minimal">
+        <input type="radio" name="img-style" value="minimal">
+        <div class="so-icon">◼</div><div class="so-name">Minimalism</div>
+      </label>
+      <label class="style-opt" data-val="comic">
+        <input type="radio" name="img-style" value="comic">
+        <div class="so-icon">💬</div><div class="so-name">Comic</div>
+      </label>
+    </div>
+  </div>
+
+  <!-- Run -->
+  <button id="run-btn" hidden>🚀 Start Processing</button>
+
+  <!-- Progress -->
+  <div class="card" id="card-progress" hidden>
+    <h2>Processing</h2>
+    <div id="progress-steps"></div>
+  </div>
+
+  <!-- Results -->
+  <div class="card" id="card-results" hidden>
+    <h2>Results</h2>
+    <div id="results-summary"></div>
+    <div class="results-actions">
+      <button class="btn-primary" id="download-zip-btn">⬇️ Download ZIP</button>
+      <button class="btn-secondary" id="review-btn">🔍 Review &amp; Edit — Session 3</button>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══ LOGIN OVERLAY ═══ -->
+<div id="login-overlay">
+  <div class="login-panel">
+    <div class="login-logo">📚</div>
+    <h2>Book Agent</h2>
+    <p class="sub">Editor access only.<br>Enter your password to continue.</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input type="password" id="login-pw" placeholder="Password" autocomplete="current-password"
+        style="padding:12px 14px;border:1.5px solid #d2d2d7;border-radius:8px;font-size:15px;font-family:inherit;outline:none;width:100%">
+      <button class="btn-primary" id="login-btn" style="padding:12px">Enter</button>
+    </div>
+    <div class="auth-err" id="login-err" style="text-align:left;margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- ═══ ADMIN OVERLAY ═══ -->
+<div id="admin-overlay" hidden>
+
+  <!-- Password gate -->
+  <div class="admin-panel" id="admin-auth-panel">
+    <h2>🔐 Admin</h2>
+    <p class="sub">Enter the admin password to access settings</p>
+    <div class="auth-row">
+      <input type="password" id="admin-pw" placeholder="Password" autocomplete="current-password">
+      <button class="btn-primary" id="admin-unlock-btn" style="flex:none;padding:10px 20px">Unlock</button>
+    </div>
+    <div class="auth-err" id="admin-auth-err"></div>
+    <div class="admin-actions" style="margin-top:16px">
+      <button class="btn-secondary" id="admin-cancel-btn">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Admin settings (shown after unlock) -->
+  <div class="admin-panel" id="admin-settings-panel" hidden>
+    <h2>⚙️ Admin Settings</h2>
+    <p class="sub">Manage translation provider and API keys</p>
+
+    <h2 style="margin-bottom:10px">Translation Provider</h2>
+    <div class="provider-list" id="provider-list">
+
+      <label class="provider-opt" id="opt-openai">
+        <input type="radio" name="provider" value="openai">
+        <div class="po-icon">⚡</div>
+        <div class="po-info">
+          <div class="po-name">OpenAI — GPT-4o-mini</div>
+          <div class="po-desc">Default · fast, good quality</div>
+        </div>
+        <span class="badge" id="badge-openai">…</span>
+      </label>
+
+      <label class="provider-opt off" id="opt-google">
+        <input type="radio" name="provider" value="google" disabled>
+        <div class="po-icon">🌐</div>
+        <div class="po-info">
+          <div class="po-name">Google Translate</div>
+          <div class="po-desc">Fast, 100+ languages</div>
+        </div>
+        <span class="badge b-soon">Soon</span>
+      </label>
+
+      <label class="provider-opt off" id="opt-claude">
+        <input type="radio" name="provider" value="claude" disabled>
+        <div class="po-icon">🧠</div>
+        <div class="po-info">
+          <div class="po-name">Claude — Haiku</div>
+          <div class="po-desc">High-quality literary translation</div>
+        </div>
+        <span class="badge b-soon">Soon</span>
+      </label>
+
+    </div>
+
+    <hr class="divider">
+
+    <h2 style="margin-bottom:10px">API Keys</h2>
+    <div id="keys-list">Loading…</div>
+
+    <div class="admin-actions">
+      <button class="btn-primary" id="admin-save-btn">Save Provider</button>
+      <button class="btn-secondary" id="admin-close-btn">Close</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+// ─── CONFIG ────────────────────────────────────────────────────────────────
+// Replace with your Worker URL after deploying:
+const WORKER_URL = 'https://books-agent.englishclubsales.workers.dev';
+
+// ─── STATE ─────────────────────────────────────────────────────────────────
+let parsedBook    = null;
+let adminUnlocked = sessionStorage.getItem('adminUnlocked') === '1';
+let editorToken   = localStorage.getItem('editorToken') || '';
+
+// ─── EPUB PARSER ───────────────────────────────────────────────────────────
+
+async function parseEPUB(file) {
+  const zip = await JSZip.loadAsync(file);
+
+  const containerXml = await zip.file('META-INF/container.xml').async('text');
+  const opfPath = containerXml.match(/full-path="([^"]+\.opf)"/)?.[1];
+  if (!opfPath) throw new Error('Invalid EPUB: OPF not found');
+
+  const opfXml = await zip.file(opfPath).async('text');
+  const opfDir = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/') + 1) : '';
+
+  const title  = opfXml.match(/<dc:title[^>]*>([^<]+)<\/dc:title>/)?.[1]?.trim()   || '';
+  const author = opfXml.match(/<dc:creator[^>]*>([^<]+)<\/dc:creator>/)?.[1]?.trim() || '';
+
+  const idRefs   = [...opfXml.matchAll(/<itemref\s+idref="([^"]+)"/g)].map(m => m[1]);
+  const manifest = {};
+  for (const m of opfXml.matchAll(/<item\s[^>]*id="([^"]+)"[^>]*href="([^"]+)"/g)) manifest[m[1]] = m[2];
+
+  const chapters = [];
+  for (const idRef of idRefs) {
+    const href = manifest[idRef];
+    if (!href) continue;
+    const path = (opfDir + href.split('#')[0]).replace(/\/\//g, '/');
+    const f = zip.file(path) || zip.file(decodeURIComponent(path));
+    if (!f) continue;
+    const html = await f.async('text');
+    const text = htmlToText(html);
+    if (text.trim().length < 80) continue;
+    const h = html.match(/<h[123][^>]*>([^<]+)<\/h[123]>/i);
+    chapters.push({ title: h ? h[1].trim() : `Chapter ${chapters.length + 1}`, content: text.trim() });
+  }
+
+  if (!chapters.length) throw new Error('No chapters found in EPUB');
+  return { title, author, chapters };
+}
+
+function htmlToText(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<head[\s\S]*?<\/head>/gi, '')
+    .replace(/<\/p>/gi, '\n\n').replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/h[1-6]>/gi, '\n\n').replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>>')
+    .replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&nbsp;/g,' ')
+    .replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n))
+    .replace(/\n{3,}/g,'\n\n').trim();
+}
+
+// ─── TXT PARSER ────────────────────────────────────────────────────────────
+
+async function parseTXT(file) {
+  const text = await file.text();
+
+  if (text.includes('[[CHAPTER:')) {
+    const markers  = [...text.matchAll(/\[\[CHAPTER:([^\]]*)\]\]/g)];
+    const parts    = text.split(/\[\[CHAPTER:[^\]]*\]\]/);
+    const chapters = markers
+      .map((m,i) => ({ title: m[1].trim(), content: (parts[i+1]||'').trim() }))
+      .filter(c => c.content.length > 50);
+    if (chapters.length) return { title:'', author:'', chapters };
+  }
+
+  const chRx = /^(Chapter|CHAPTER|Ch\.)\s+[\dIVXivx]+[^\n]*/m;
+  if (chRx.test(text)) {
+    const parts    = text.split(/(?=^(?:Chapter|CHAPTER|Ch\.)\s+[\dIVXivx]+)/m);
+    const chapters = parts.filter(p=>p.trim().length>100).map((p,i)=>{
+      const lines = p.split('\n');
+      return { title: lines[0].trim()||`Chapter ${i+1}`, content: lines.slice(1).join('\n').trim() };
+    });
+    if (chapters.length > 1) return { title:'', author:'', chapters };
+  }
+
+  const paras = text.split(/\n\n+/);
+  const chapters = []; let buf=[], words=0, n=1;
+  for (const p of paras) {
+    buf.push(p); words += p.split(/\s+/).length;
+    if (words >= 2000) { chapters.push({ title:`Chapter ${n++}`, content:buf.join('\n\n') }); buf=[]; words=0; }
+  }
+  if (buf.length) chapters.push({ title:`Chapter ${n}`, content:buf.join('\n\n') });
+
+  return { title:'', author:'', chapters };
+}
+
+// ─── FILE HANDLER ──────────────────────────────────────────────────────────
+
+async function handleFile(file) {
+  const dz = document.getElementById('drop-zone');
+  dz.innerHTML = '<div class="dz-icon">⏳</div><div class="dz-label">Parsing…</div>';
+
+  try {
+    const ext  = file.name.split('.').pop().toLowerCase();
+    if (!['epub','txt'].includes(ext)) throw new Error('Use EPUB or TXT');
+    const book = ext === 'epub' ? await parseEPUB(file) : await parseTXT(file);
+    parsedBook = book;
+
+    dz.hidden = true;
+    const pill = document.getElementById('file-pill');
+    pill.hidden = false;
+    document.getElementById('fp-icon').textContent = ext === 'epub' ? '📕' : '📄';
+    document.getElementById('fp-name').textContent = file.name;
+    document.getElementById('fp-meta').textContent = `${fmtSize(file.size)} · ${book.chapters.length} chapters`;
+
+    document.getElementById('book-title').value  = book.title  || '';
+    document.getElementById('book-author').value = book.author || '';
+    document.getElementById('parsed-hint').textContent = book.title
+      ? `✅ Metadata from EPUB: "${book.title}" — ${book.author || 'Unknown'}`
+      : '⚠️ No metadata — fill in title and author manually';
+
+    show('card-info'); show('card-langs'); show('card-options'); show('run-btn');
+
+  } catch (err) {
+    dz.innerHTML = `<div class="dz-icon">❌</div><div class="dz-label">${err.message}</div>`;
+    setTimeout(resetDropZone, 4000);
+  }
+}
+
+function resetDropZone() {
+  const dz = document.getElementById('drop-zone');
+  dz.hidden = false;
+  dz.innerHTML = '<div class="dz-icon">📂</div><div class="dz-label">Drop EPUB or TXT here</div><div class="dz-hint">or click to browse</div>';
+}
+
+// ─── PIPELINE ──────────────────────────────────────────────────────────────
+
+const LEVEL_ORDER = ['C2','C1','B2','B1','A2','A1'];
+const LEVEL_KEY   = { B2:'b2', B1:'b1', A2:'a2', A1:'a1' };
+const ALL_LEVELS  = ['original','b2','b1','a2','a1'];
+
+async function runPipeline(book, settings) {
+  const n   = book.chapters.length;
+  const nL  = settings.languages.length;
+
+  const steps = [
+    { id:'detect',    label:'Detecting original level' },
+    { id:'adapt-b2',  label:`Adapting → B2` },
+    { id:'adapt-b1',  label:`Adapting → B1` },
+    { id:'adapt-a2',  label:`Adapting → A2` },
+    { id:'adapt-a1',  label:`Adapting → A1` },
+    { id:'translate', label:`Translating` },
+    { id:'metadata',  label:'Generating descriptions' },
+    { id:'pack',      label:'Packaging result' },
+  ];
+
+  renderSteps(steps);
+  show('card-progress');
+  document.getElementById('card-progress').scrollIntoView({ behavior:'smooth' });
+
+  try {
+
+    // ── 1. Detect level ────────────────────────────────────────────────────
+    setStep('detect','running');
+    const sample = book.chapters.slice(0,3).map(c=>c.content).join('\n\n');
+    const { level: detectedLevel } = await apiPost('/api/detect-level', { text: sample });
+    book.detectedLevel = detectedLevel;
+    setStep('detect','done', `Detected: ${detectedLevel}`);
+
+    // ── 2-5. Cascade adaptation (English only) ────────────────────────────
+    // chapterTexts[levelKey] = array of strings, one per chapter
+    const chapterTexts = {
+      original: book.chapters.map(c => `[[CHAPTER: ${c.title}]]\n\n${c.content}`),
+    };
+
+    const cascade = [
+      { key:'b2', label:'B2', from: detectedLevel },
+      { key:'b1', label:'B1', from:'B2' },
+      { key:'a2', label:'A2', from:'B1' },
+      { key:'a1', label:'A1', from:'A2' },
+    ];
+
+    for (const { key, label, from } of cascade) {
+      const stepId = `adapt-${key}`;
+
+      // Skip if original is already at this level or simpler
+      if (LEVEL_ORDER.indexOf(label) <= LEVEL_ORDER.indexOf(detectedLevel)) {
+        chapterTexts[key] = chapterTexts.original;
+        setStep(stepId,'done', `Original is ${detectedLevel} — using as-is`);
+        continue;
+      }
+
+      const sourceTexts = key === 'b2'
+        ? chapterTexts.original
+        : chapterTexts[cascade[cascade.findIndex(c=>c.key===key)-1].key];
+
+      setStep(stepId,'running', `0 / ${n} chapters`);
+      let done = 0;
+      const adapted = new Array(n);
+
+      await runBatch(
+        book.chapters.map((_,i) => i),
+        async (i) => {
+          const { text } = await apiPost('/api/adapt', {
+            text:      sourceTexts[i],
+            fromLevel: from,
+            toLevel:   label,
+          });
+          adapted[i] = text;
+          done++;
+          setStep(stepId,'running', `${done} / ${n} chapters`);
+        },
+        3
+      );
+
+      chapterTexts[key] = adapted;
+      setStep(stepId,'done', `${n} chapters`);
+    }
+
+    // ── 6. Translate all levels × all languages ───────────────────────────
+    const totalTasks = ALL_LEVELS.length * nL * n;
+    let translatedCount = 0;
+    setStep('translate','running', `0 / ${totalTasks} chunks`);
+
+    // translations[levelKey][langCode] = array of chapter strings
+    const translations = {};
+    for (const lvl of ALL_LEVELS) {
+      translations[lvl] = { en: chapterTexts[lvl] };
+    }
+
+    // Build task list: { lvl, lang, i }
+    const tasks = [];
+    for (const lvl of ALL_LEVELS)
+      for (const lang of settings.languages)
+        for (let i = 0; i < n; i++)
+          tasks.push({ lvl, lang, i });
+
+    // Pre-allocate arrays
+    for (const lvl of ALL_LEVELS)
+      for (const lang of settings.languages)
+        translations[lvl][lang] = new Array(n);
+
+    await runBatch(tasks, async ({ lvl, lang, i }) => {
+      const { text } = await apiPost('/api/translate', {
+        text: chapterTexts[lvl][i],
+        targetLang: lang,
+      });
+      translations[lvl][lang][i] = text;
+      translatedCount++;
+      setStep('translate','running', `${translatedCount} / ${totalTasks} chunks`);
+    }, 8);
+
+    setStep('translate','done', `${totalTasks} chunks · ${ALL_LEVELS.length} levels · ${nL} languages`);
+
+    // ── 7. Descriptions ───────────────────────────────────────────────────
+    setStep('metadata','running');
+    const excerpt = chapterTexts.original.slice(0,2).join('\n\n');
+    const descriptions = {};
+    const descLangs = ['en', ...settings.languages];
+
+    await runBatch(descLangs, async (lang) => {
+      const { description } = await apiPost('/api/describe', {
+        title: book.title, author: book.author, excerpt, targetLang: lang,
+      });
+      descriptions[lang] = description;
+    }, 4);
+
+    setStep('metadata','done', `${descLangs.length} languages`);
+
+    // ── 8. Pack ───────────────────────────────────────────────────────────
+    setStep('pack','running');
+
+    // Assemble: join chapter arrays into full book text per level/lang
+    const levels = {};
+    for (const lvl of ALL_LEVELS) {
+      levels[lvl] = {};
+      for (const lang of ['en', ...settings.languages]) {
+        if (translations[lvl][lang]) {
+          levels[lvl][lang] = translations[lvl][lang].join('\n\n\n');
+        }
+      }
+    }
+
+    window.bookResults = {
+      meta: {
+        title:          book.title,
+        author:         book.author,
+        slug:           slugify(book.title),
+        detectedLevel,
+        languages:      settings.languages,
+        imageStyle:     settings.imageStyle,
+        chaptersCount:  n,
+      },
+      levels,
+      descriptions,
+      cover: document.getElementById('cover-input').files[0] || null,
+    };
+
+    setStep('pack','done');
+
+    // Show results card
+    renderResultsSummary(window.bookResults);
+    show('card-results');
+    document.getElementById('card-results').scrollIntoView({ behavior:'smooth' });
+
+  } catch (err) {
+    // Mark any running step as error
+    document.querySelectorAll('.ps-icon').forEach(el => {
+      if (el.textContent === '⏳') el.textContent = '❌';
+    });
+    toast(`❌ ${err.message}`);
+  }
+
+  resetRunBtn();
+}
+
+// ─── PIPELINE HELPERS ──────────────────────────────────────────────────────
+
+// Run tasks array with limited concurrency
+async function runBatch(items, fn, concurrency = 3) {
+  let idx = 0;
+  async function worker() {
+    while (idx < items.length) {
+      const i = idx++;
+      await fn(items[i], i);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, worker)
+  );
+}
+
+function slugify(text) {
+  return (text || 'book')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 50);
+}
+
+function renderResultsSummary(results) {
+  const { meta, levels, descriptions } = results;
+  const langCount  = meta.languages.length;
+  const levelCount = Object.keys(levels).length; // 5
+  const fileCount  = levelCount * (langCount + 1) + langCount + 1; // levels×langs + descs + book.json
+
+  document.getElementById('results-summary').innerHTML = `
+    <div class="results-summary">
+      <div class="rs-stat"><div class="rs-num">${meta.chaptersCount}</div><div class="rs-label">Chapters</div></div>
+      <div class="rs-stat"><div class="rs-num">${levelCount}</div><div class="rs-label">Levels (orig + 4)</div></div>
+      <div class="rs-stat"><div class="rs-num">${langCount + 1}</div><div class="rs-label">Languages (EN + ${langCount})</div></div>
+    </div>
+    <p style="font-size:13px;color:#86868b;margin-bottom:16px">
+      📖 <b>${meta.title}</b> by ${meta.author} · Original level: <b>${meta.detectedLevel}</b>
+    </p>`;
+}
+
+// ─── PROGRESS UI ───────────────────────────────────────────────────────────
+
+const ICONS = { pending:'⬜', running:'⏳', done:'✅', error:'❌' };
+
+function renderSteps(steps) {
+  document.getElementById('progress-steps').innerHTML = steps.map(s=>`
+    <div class="progress-step">
+      <div class="ps-icon" id="si-${s.id}">${ICONS.pending}</div>
+      <div>
+        <div class="ps-label">${s.label}</div>
+        <div class="ps-detail" id="sd-${s.id}"></div>
+      </div>
+    </div>`).join('');
+}
+
+function setStep(id, state, detail='') {
+  const icon = document.getElementById(`si-${id}`);
+  const det  = document.getElementById(`sd-${id}`);
+  if (icon) icon.textContent  = ICONS[state]||'⬜';
+  if (det)  det.textContent   = detail;
+}
+
+// ─── ZIP GENERATOR ─────────────────────────────────────────────────────────
+
+async function downloadZIP() {
+  const r = window.bookResults;
+  if (!r) return;
+
+  const btn = document.getElementById('download-zip-btn');
+  btn.disabled = true; btn.textContent = '⏳ Building ZIP…';
+
+  try {
+    const zip  = new JSZip();
+    const root = zip.folder(r.meta.slug);
+
+    // book.json
+    const bookJson = {
+      id:       r.meta.slug,
+      title:    r.meta.title,
+      author:   r.meta.author,
+      language: 'en',
+      levels:   ['original','b2','b1','a2','a1'],
+      languages: ['en', ...r.meta.languages],
+    };
+    root.file('book.json', JSON.stringify(bookJson, null, 2));
+
+    // cover
+    if (r.cover) {
+      const buf = await r.cover.arrayBuffer();
+      root.file('cover.jpg', buf);
+    }
+
+    // descriptions
+    for (const [lang, text] of Object.entries(r.descriptions)) {
+      root.file(`desc.${lang}.txt`, text);
+    }
+
+    // levels
+    const levelsFolder = root.folder('levels');
+    for (const [lvlKey, langs] of Object.entries(r.levels)) {
+      const lvlFolder = levelsFolder.folder(lvlKey);
+      for (const [lang, text] of Object.entries(langs)) {
+        lvlFolder.file(`book.${lang}.txt`, text);
+      }
+    }
+
+    // Generate and download
+    const blob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${r.meta.slug}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+  } catch (err) {
+    toast(`❌ ZIP error: ${err.message}`);
+  }
+
+  btn.disabled = false; btn.textContent = '⬇️ Download ZIP';
+}
+
+// ─── LOGIN ─────────────────────────────────────────────────────────────────
+
+function showLoginOverlay() {
+  document.getElementById('login-overlay').style.display = 'flex';
+  document.getElementById('logout-btn').classList.remove('visible');
+  setTimeout(() => document.getElementById('login-pw').focus(), 100);
+}
+
+function hideLoginOverlay() {
+  document.getElementById('login-overlay').style.display = 'none';
+  document.getElementById('logout-btn').classList.add('visible');
+}
+
+async function submitLogin() {
+  const pw    = document.getElementById('login-pw').value;
+  const errEl = document.getElementById('login-err');
+  const btn   = document.getElementById('login-btn');
+  const input = document.getElementById('login-pw');
+
+  if (!pw) { errEl.textContent = 'Enter password'; return; }
+
+  btn.disabled = true; btn.textContent = '…';
+  errEl.textContent = '';
+  input.classList.remove('error');
+
+  try {
+    // /api/auth is a public endpoint — no token needed
+    const res  = await fetch(WORKER_URL + '/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      editorToken = pw;
+      localStorage.setItem('editorToken', pw);
+      input.value = '';
+      hideLoginOverlay();
+    } else {
+      input.classList.add('error');
+      errEl.textContent = data.error || 'Wrong password';
+    }
+  } catch (err) {
+    errEl.textContent = err.message || 'Connection error — check Worker URL';
+  }
+
+  btn.disabled = false; btn.textContent = 'Enter';
+}
+
+function logout() {
+  editorToken = '';
+  localStorage.removeItem('editorToken');
+  adminUnlocked = false;
+  sessionStorage.removeItem('adminUnlocked');
+  document.getElementById('admin-btn').classList.remove('unlocked');
+  showLoginOverlay();
+}
+
+// ─── ADMIN ─────────────────────────────────────────────────────────────────
+
+function openAdmin() {
+  show('admin-overlay');
+  if (adminUnlocked) {
+    hide('admin-auth-panel');
+    show('admin-settings-panel');
+    loadAdminConfig();
+  } else {
+    show('admin-auth-panel');
+    hide('admin-settings-panel');
+    setTimeout(()=>document.getElementById('admin-pw').focus(), 50);
+  }
+}
+
+function closeAdmin() {
+  hide('admin-overlay');
+}
+
+async function unlockAdmin() {
+  const pw    = document.getElementById('admin-pw').value;
+  const input = document.getElementById('admin-pw');
+  const errEl = document.getElementById('admin-auth-err');
+  const btn   = document.getElementById('admin-unlock-btn');
+
+  if (!pw) { errEl.textContent = 'Enter a password'; return; }
+
+  btn.disabled = true; btn.textContent = '…';
+  errEl.textContent = '';
+  input.classList.remove('error');
+
+  try {
+    const res  = await apiPost('/api/admin/auth', { password: pw });
+    if (res.ok) {
+      adminUnlocked = true;
+      sessionStorage.setItem('adminUnlocked','1');
+      document.getElementById('admin-btn').classList.add('unlocked');
+      hide('admin-auth-panel');
+      show('admin-settings-panel');
+      loadAdminConfig();
+    } else {
+      input.classList.add('error');
+      errEl.textContent = 'Incorrect password';
+    }
+  } catch (err) {
+    errEl.textContent = err.message || 'Connection error — check Worker URL';
+  }
+
+  btn.disabled = false; btn.textContent = 'Unlock';
+}
+
+async function loadAdminConfig() {
+  const keysList = document.getElementById('keys-list');
+  keysList.textContent = 'Loading…';
+
+  try {
+    const res = await fetch(`${WORKER_URL}/api/config`, {
+      headers: editorToken ? { 'X-Editor-Token': editorToken } : {},
+    });
+    const cfg = await res.json();
+
+    // Set provider radio
+    const radio = document.querySelector(`input[name="provider"][value="${cfg.provider}"]`);
+    if (radio && !radio.disabled) {
+      radio.checked = true;
+      document.querySelectorAll('.provider-opt').forEach(o=>o.classList.remove('selected'));
+      radio.closest('.provider-opt').classList.add('selected');
+    }
+
+    // OpenAI badge
+    const ok = cfg.keys.openai;
+    const b  = document.getElementById('badge-openai');
+    b.textContent = ok ? '✅ Set' : '❌ Missing';
+    b.className   = `badge ${ok ? 'b-ok' : 'b-miss'}`;
+    if (!ok) {
+      document.getElementById('opt-openai').classList.add('off');
+      document.querySelector('input[value="openai"]').disabled = true;
+    }
+
+    // Keys list
+    keysList.innerHTML = [
+      { name:'OPENAI_API_KEY',    desc:'GPT-4o (adaptation) + GPT-4o-mini (translation)', ok:cfg.keys.openai,  cmd:'wrangler secret put OPENAI_API_KEY' },
+      { name:'ADMIN_PASSWORD',    desc:'Admin panel password',                              ok:true,             cmd:'' },
+      { name:'GOOGLE_API_KEY',    desc:'Google Translate (coming soon)',                    ok:cfg.keys.google,  cmd:'wrangler secret put GOOGLE_API_KEY' },
+      { name:'ANTHROPIC_API_KEY', desc:'Claude Haiku translation (coming soon)',            ok:cfg.keys.claude,  cmd:'wrangler secret put ANTHROPIC_API_KEY' },
+    ].map(k=>`
+      <div class="key-row">
+        <div>
+          <div class="kr-name">${k.name}</div>
+          <div class="kr-desc">${k.desc}</div>
+          ${!k.ok && k.cmd ? `<div class="kr-cmd">${k.cmd}</div>` : ''}
+        </div>
+        <span class="badge ${k.ok ? 'b-ok':'b-miss'}">${k.ok ? '✅ Set':'❌ Missing'}</span>
+      </div>`).join('');
+
+  } catch (err) {
+    keysList.textContent = `Error: ${err.message}`;
+  }
+}
+
+async function saveProvider() {
+  const radio = document.querySelector('input[name="provider"]:checked');
+  if (!radio) return;
+  const btn = document.getElementById('admin-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const data = await apiPost('/api/provider', { provider: radio.value });
+    if (data.ok) toast(`✅ Provider set to "${data.provider}"`);
+    else         toast(`❌ ${data.error}`);
+  } catch (err) { toast(`❌ ${err.message}`); }
+  btn.disabled = false; btn.textContent = 'Save Provider';
+}
+
+// ─── API ───────────────────────────────────────────────────────────────────
+
+async function apiPost(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (editorToken) headers['X-Editor-Token'] = editorToken;
+
+  const res = await fetch(WORKER_URL + path, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 401) {
+    editorToken = '';
+    localStorage.removeItem('editorToken');
+    showLoginOverlay();
+    throw new Error('Session expired — please log in again');
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({ error: res.statusText }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ─── HELPERS ───────────────────────────────────────────────────────────────
+
+function show(id) { document.getElementById(id).hidden = false; }
+function hide(id) { document.getElementById(id).hidden = true; }
+
+function fmtSize(b) {
+  if (b < 1024)    return `${b} B`;
+  if (b < 1<<20)   return `${(b/1024).toFixed(1)} KB`;
+  return `${(b/(1<<20)).toFixed(1)} MB`;
+}
+
+function resetRunBtn() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = false; btn.textContent = '🚀 Start Processing';
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 3000);
+}
+
+// ─── EVENTS ────────────────────────────────────────────────────────────────
+
+// File upload
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('click', ()=>fileInput.click());
+dropZone.addEventListener('dragover',  e=>{ e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', ()=>dropZone.classList.remove('over'));
+dropZone.addEventListener('drop', e=>{
+  e.preventDefault(); dropZone.classList.remove('over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', ()=>{ if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+document.getElementById('fp-remove').addEventListener('click', ()=>{
+  parsedBook = null; fileInput.value = '';
+  document.getElementById('file-pill').hidden = true;
+  resetDropZone();
+  ['card-info','card-langs','card-options','run-btn','card-progress','card-results'].forEach(hide);
+});
+
+// Languages
+document.getElementById('toggle-all-langs').addEventListener('click', ()=>{
+  const cbs  = [...document.querySelectorAll('input[name="lang"]')];
+  const all  = cbs.every(c=>c.checked);
+  cbs.forEach(c=>c.checked=!all);
+});
+
+// Image style
+document.querySelectorAll('.style-opt').forEach(opt=>{
+  opt.addEventListener('click', ()=>{
+    document.querySelectorAll('.style-opt').forEach(o=>o.classList.remove('selected'));
+    opt.classList.add('selected');
+  });
+});
+
+// Run
+document.getElementById('run-btn').addEventListener('click', async ()=>{
+  if (!parsedBook) return;
+  const title = document.getElementById('book-title').value.trim();
+  if (!title) { alert('Enter book title'); return; }
+  const languages = [...document.querySelectorAll('input[name="lang"]:checked')].map(c=>c.value);
+  if (!languages.length) { alert('Select at least one language'); return; }
+  const imageStyle = document.querySelector('input[name="img-style"]:checked').value;
+  parsedBook.title  = title;
+  parsedBook.author = document.getElementById('book-author').value.trim();
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true; btn.textContent = '⏳ Processing…';
+  await runPipeline(parsedBook, { languages, imageStyle });
+});
+
+// Results
+document.getElementById('download-zip-btn').addEventListener('click', downloadZIP);
+document.getElementById('review-btn').addEventListener('click', () => {
+  toast('Review & Edit coming in Session 3');
+});
+
+// Admin
+document.getElementById('admin-btn').addEventListener('click', openAdmin);
+document.getElementById('admin-cancel-btn').addEventListener('click', closeAdmin);
+document.getElementById('admin-close-btn').addEventListener('click', closeAdmin);
+document.getElementById('admin-save-btn').addEventListener('click', saveProvider);
+
+document.getElementById('admin-unlock-btn').addEventListener('click', unlockAdmin);
+document.getElementById('admin-pw').addEventListener('keydown', e=>{ if(e.key==='Enter') unlockAdmin(); });
+
+// Close overlay on backdrop click
+document.getElementById('admin-overlay').addEventListener('click', e=>{
+  if (e.target === document.getElementById('admin-overlay')) closeAdmin();
+});
+
+// Provider radio highlight
+document.getElementById('provider-list').addEventListener('change', e=>{
+  if (e.target.name !== 'provider') return;
+  document.querySelectorAll('.provider-opt').forEach(o=>o.classList.remove('selected'));
+  e.target.closest('.provider-opt').classList.add('selected');
+});
+
+// Login
+document.getElementById('login-btn').addEventListener('click', submitLogin);
+document.getElementById('login-pw').addEventListener('keydown', e => { if (e.key === 'Enter') submitLogin(); });
+
+// Logout
+document.getElementById('logout-btn').addEventListener('click', logout);
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+
+// Restore admin unlock state
+if (adminUnlocked) document.getElementById('admin-btn').classList.add('unlocked');
+
+// Show/hide login overlay based on stored token
+if (editorToken) {
+  hideLoginOverlay();
+} else {
+  // login-overlay is visible by default (no hidden attr)
+  document.getElementById('logout-btn').classList.remove('visible');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+name = "books-agent"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+# KV namespace for storing active provider setting
+# To create: wrangler kv:namespace create "KV"
+# Then replace the id values below with the output
+[[kv_namespaces]]
+binding = "KV"
+id = "97167b7d44554de4b854ae3dbccfd728"
+preview_id = "97167b7d44554de4b854ae3dbccfd728"
+
+# Secrets are set via CLI — never put real keys here:
+#   wrangler secret put OPENAI_API_KEY
+#   wrangler secret put ADMIN_PASSWORD       (any string you choose)
+#   wrangler secret put GOOGLE_API_KEY       (when ready)
+#   wrangler secret put ANTHROPIC_API_KEY    (when ready)
