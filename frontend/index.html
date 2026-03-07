@@ -852,15 +852,30 @@ function extractTitleCandidates(text) {
 // Split full text into individual stories by title markers
 function splitIntoStories(text, titles) {
   const stories = [];
-  // Find position of each title in the text
-  const positions = titles.map(title => ({
-    title,
-    idx: text.indexOf(title),
-  })).filter(p => p.idx !== -1).sort((a, b) => a.idx - b.idx);
+  const lowerText = text.toLowerCase();
 
-  for (let i = 0; i < positions.length; i++) {
-    const { title, idx } = positions[i];
-    const nextIdx = i < positions.length - 1 ? positions[i + 1].idx : text.length;
+  const positions = titles.map(title => {
+    // 1. Exact match
+    let idx = text.indexOf(title);
+    if (idx !== -1) return { title, idx };
+    // 2. Case-insensitive fallback (GPT may normalise casing)
+    const lc = title.toLowerCase();
+    idx = lowerText.indexOf(lc);
+    if (idx !== -1) return { title: text.slice(idx, idx + title.length), idx };
+    return { title, idx: -1 };
+  }).filter(p => p.idx !== -1).sort((a, b) => a.idx - b.idx);
+
+  // Remove duplicate positions (same idx keeps first)
+  const seenIdx = new Set();
+  const unique = positions.filter(p => {
+    if (seenIdx.has(p.idx)) return false;
+    seenIdx.add(p.idx);
+    return true;
+  });
+
+  for (let i = 0; i < unique.length; i++) {
+    const { title, idx } = unique[i];
+    const nextIdx = i < unique.length - 1 ? unique[i + 1].idx : text.length;
     // Content starts after the title line
     const afterTitle = text.indexOf('\n', idx + title.length);
     const content = text.slice(afterTitle > -1 ? afterTitle : idx + title.length, nextIdx).trim();
@@ -880,7 +895,9 @@ async function detectBookStructure(cleanedText) {
   try {
     const result = await apiPost('/api/structure', { sample, candidates });
     return result;
-  } catch {
+  } catch (err) {
+    console.error('Structure detection failed:', err);
+    toast(`⚠️ Structure detection failed: ${err.message}`);
     return { type: 'single', stories: [] };
   }
 }
@@ -964,9 +981,18 @@ async function parseEPUB(file) {
   const title  = opfXml.match(/<dc:title[^>]*>([^<]+)<\/dc:title>/)?.[1]?.trim()   || '';
   const author = opfXml.match(/<dc:creator[^>]*>([^<]+)<\/dc:creator>/)?.[1]?.trim() || '';
 
-  const idRefs   = [...opfXml.matchAll(/<itemref\s+idref="([^"]+)"/g)].map(m => m[1]);
+  // Parse spine (idref may appear anywhere in <itemref ...>)
+  const idRefs = [...opfXml.matchAll(/<itemref\b[^>]*>/g)]
+    .map(m => m[0].match(/\bidref="([^"]+)"/)?.[1])
+    .filter(Boolean);
+
+  // Parse manifest — attribute order is not guaranteed in EPUB
   const manifest = {};
-  for (const m of opfXml.matchAll(/<item\s[^>]*id="([^"]+)"[^>]*href="([^"]+)"/g)) manifest[m[1]] = m[2];
+  for (const m of opfXml.matchAll(/<item\b[^>]*>/g)) {
+    const id   = m[0].match(/\bid="([^"]+)"/)?.[1];
+    const href = m[0].match(/\bhref="([^"]+)"/)?.[1];
+    if (id && href) manifest[id] = href;
+  }
 
   const chapters = [];
   for (const idRef of idRefs) {
@@ -1136,6 +1162,10 @@ async function handleFile(file) {
           updateCostEstimate();
           return; // collection handling complete
         }
+        // GPT said collection but we couldn't split — fall through as single
+        console.warn('Collection detected but split failed. GPT titles:', structure.stories);
+        toast(`⚠️ Collection detected (${structure.stories.length} titles) but could not split text — processed as single`);
+        collectionMode = false;
       }
 
       // Single or chapters — update meta and continue as normal
