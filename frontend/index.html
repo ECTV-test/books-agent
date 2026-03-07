@@ -250,6 +250,51 @@
     .ps-label  { font-size: 14px; font-weight: 500; }
     .ps-detail { font-size: 12px; color: #86868b; margin-top: 2px; }
 
+    /* ── Collection selector ── */
+    .story-list { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+    .story-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1.5px solid #d2d2d7;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .story-item:hover { border-color: #0071e3; background: #f0f7ff; }
+    .story-item.selected { border-color: #0071e3; background: #f0f7ff; }
+    .story-item input[type="checkbox"] { accent-color: #0071e3; width: 16px; height: 16px; flex-shrink: 0; }
+    .si-title { font-size: 14px; font-weight: 500; flex: 1; }
+    .si-meta  { font-size: 12px; color: #86868b; white-space: nowrap; }
+    .si-cost  { font-size: 12px; color: #0071e3; font-weight: 600; white-space: nowrap; }
+    .collection-total {
+      margin-top: 12px;
+      padding: 12px 14px;
+      background: #f5f5f7;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+    }
+    .ct-count { color: #86868b; }
+    .ct-cost  { font-weight: 700; color: #0071e3; font-size: 16px; }
+
+    /* ── Results list (multi-story) ── */
+    .story-result {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #f5f5f7;
+    }
+    .story-result:last-child { border-bottom: none; }
+    .sr-title { font-size: 14px; font-weight: 500; flex: 1; }
+    .sr-status { font-size: 13px; color: #86868b; }
+
     /* ── Results ── */
     .results-summary {
       display: grid;
@@ -511,6 +556,20 @@
     <input type="file" id="file-input" accept=".epub,.txt" hidden>
   </div>
 
+  <!-- Collection detection (shown only for TXT collections) -->
+  <div class="card" id="card-collection" hidden>
+    <h2>📚 Collection Detected</h2>
+    <div class="section-header" style="margin-bottom:8px">
+      <span id="collection-subtitle" style="font-size:13px;color:#86868b"></span>
+      <button class="text-btn" id="toggle-all-stories">Select all</button>
+    </div>
+    <div class="story-list" id="story-list"></div>
+    <div class="collection-total" id="collection-total">
+      <span class="ct-count">Select stories to process</span>
+      <span class="ct-cost"></span>
+    </div>
+  </div>
+
   <!-- Step 2: Book Info -->
   <div class="card" id="card-info" hidden>
     <h2>Step 2 — Book Info</h2>
@@ -590,9 +649,17 @@
   <div class="card" id="card-results" hidden>
     <h2>Results</h2>
     <div id="results-summary"></div>
-    <div class="results-actions">
+    <!-- Single book -->
+    <div class="results-actions" id="results-single">
       <button class="btn-primary" id="download-zip-btn">⬇️ Download ZIP</button>
-      <button class="btn-secondary" id="review-btn">🔍 Review &amp; Edit — Session 3</button>
+      <button class="btn-secondary" id="review-btn">🔍 Review &amp; Edit — Session 4</button>
+    </div>
+    <!-- Collection: per-story + download all -->
+    <div id="results-collection" hidden>
+      <div class="story-list" id="story-results-list"></div>
+      <div style="margin-top:14px">
+        <button class="btn-primary" id="download-all-btn" style="width:100%">⬇️ Download All as collection.zip</button>
+      </div>
     </div>
   </div>
 
@@ -753,9 +820,134 @@ function updateCostEstimate() {
 }
 
 // ─── STATE ─────────────────────────────────────────────────────────────────
-let parsedBook    = null;
+let parsedBook      = null;
+let collectionMode  = false;      // true when a collection is detected
+let collectionStories = [];       // [{title, content, wordCount, chapters}]
+let collectionResults = [];       // [{title, zip}] after processing
 let adminUnlocked = sessionStorage.getItem('adminUnlocked') === '1';
 let editorToken   = localStorage.getItem('editorToken') || '';
+
+// ─── COLLECTION / STRUCTURE ────────────────────────────────────────────────
+
+// Extract standalone short lines as potential story title candidates
+function extractTitleCandidates(text) {
+  const lines = text.split('\n');
+  const candidates = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const prevBlank = i === 0 || !lines[i - 1].trim();
+    const nextBlank = i >= lines.length - 1 || !lines[i + 1].trim();
+    const isShort   = line.length >= 3 && line.length <= 80;
+    const notNum    = !/^\d+$/.test(line);
+    const notMeta   = !/^(by |the end|copyright|published|printed)/i.test(line);
+    if (prevBlank && nextBlank && isShort && notNum && notMeta) {
+      candidates.push(line);
+    }
+  }
+  // Deduplicate, keep order, max 60
+  return [...new Map(candidates.map(c => [c.toLowerCase(), c])).values()].slice(0, 60);
+}
+
+// Split full text into individual stories by title markers
+function splitIntoStories(text, titles) {
+  const stories = [];
+  // Find position of each title in the text
+  const positions = titles.map(title => ({
+    title,
+    idx: text.indexOf(title),
+  })).filter(p => p.idx !== -1).sort((a, b) => a.idx - b.idx);
+
+  for (let i = 0; i < positions.length; i++) {
+    const { title, idx } = positions[i];
+    const nextIdx = i < positions.length - 1 ? positions[i + 1].idx : text.length;
+    // Content starts after the title line
+    const afterTitle = text.indexOf('\n', idx + title.length);
+    const content = text.slice(afterTitle > -1 ? afterTitle : idx + title.length, nextIdx).trim();
+    if (content.length < 80) continue; // skip empty sections
+    const wordCount = content.split(/\s+/).filter(Boolean).length;
+    stories.push({ title, content, wordCount });
+  }
+  return stories;
+}
+
+// Call /api/structure to detect collection vs single
+async function detectBookStructure(cleanedText) {
+  const sample     = cleanedText.slice(0, 6000);
+  const candidates = extractTitleCandidates(cleanedText);
+  if (candidates.length < 2) return { type: 'single', stories: [] };
+
+  try {
+    const result = await apiPost('/api/structure', { sample, candidates });
+    return result;
+  } catch {
+    return { type: 'single', stories: [] };
+  }
+}
+
+// Render collection selection card
+function renderCollectionCard(stories, langCount, includeImages) {
+  collectionStories = stories;
+  const list = document.getElementById('story-list');
+  const subtitle = document.getElementById('collection-subtitle');
+  subtitle.textContent = `${stories.length} stories found — select which to process`;
+
+  list.innerHTML = stories.map((s, i) => {
+    const c = estimateCost(s.wordCount, 1, langCount, includeImages);
+    return `
+      <label class="story-item selected" id="story-item-${i}">
+        <input type="checkbox" name="story" value="${i}" checked>
+        <span class="si-title">${s.title}</span>
+        <span class="si-meta">${s.wordCount.toLocaleString()} words</span>
+        <span class="si-cost">~$${c.total.toFixed(2)}</span>
+      </label>`;
+  }).join('');
+
+  // Click whole row toggles checkbox
+  list.querySelectorAll('.story-item').forEach(item => {
+    item.addEventListener('click', e => {
+      if (e.target.type === 'checkbox') return;
+      const cb = item.querySelector('input[type="checkbox"]');
+      cb.checked = !cb.checked;
+      item.classList.toggle('selected', cb.checked);
+      updateCollectionTotal();
+    });
+  });
+  list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('.story-item').classList.toggle('selected', cb.checked);
+      updateCollectionTotal();
+    });
+  });
+
+  updateCollectionTotal();
+  show('card-collection');
+}
+
+function updateCollectionTotal() {
+  const checked   = [...document.querySelectorAll('input[name="story"]:checked')];
+  const langCount = [...document.querySelectorAll('input[name="lang"]:checked')].length;
+  const imgStyle  = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
+  const imgs      = imgStyle !== 'none';
+
+  let totalCost = 0;
+  checked.forEach(cb => {
+    const story = collectionStories[+cb.value];
+    if (story) totalCost += estimateCost(story.wordCount, 1, langCount, imgs).total;
+  });
+
+  const total = document.getElementById('collection-total');
+  total.querySelector('.ct-count').textContent =
+    checked.length ? `${checked.length} of ${collectionStories.length} stories selected` : 'No stories selected';
+  total.querySelector('.ct-cost').textContent =
+    checked.length ? `~$${totalCost.toFixed(2)}` : '';
+}
+
+function getSelectedStories() {
+  return [...document.querySelectorAll('input[name="story"]:checked')]
+    .map(cb => collectionStories[+cb.value])
+    .filter(Boolean);
+}
 
 // ─── EPUB PARSER ───────────────────────────────────────────────────────────
 
@@ -875,15 +1067,13 @@ async function parseTXT(file) {
     if (chapters.length > 1) return { title:'', author:'', chapters };
   }
 
-  const paras = text.split(/\n\n+/);
-  const chapters = []; let buf=[], words=0, n=1;
-  for (const p of paras) {
-    buf.push(p); words += p.split(/\s+/).length;
-    if (words >= 2000) { chapters.push({ title:`Chapter ${n++}`, content:buf.join('\n\n') }); buf=[]; words=0; }
-  }
-  if (buf.length) chapters.push({ title:`Chapter ${n}`, content:buf.join('\n\n') });
-
-  return { title:'', author:'', chapters };
+  // No clear structure found — return as single text, needs structure detection
+  return {
+    title: '', author: '',
+    chapters: [{ title: '', content: text }],
+    rawText: text,            // full cleaned text for collection splitting
+    needsStructureDetection: true,
+  };
 }
 
 // ─── FILE HANDLER ──────────────────────────────────────────────────────────
@@ -915,7 +1105,46 @@ async function handleFile(file) {
       ? `✅ Metadata from EPUB: "${book.title}" — ${book.author || 'Unknown'}`
       : '⚠️ No metadata — fill in title and author manually';
 
-    show('card-info'); show('card-langs'); show('card-options'); show('cost-estimate'); show('run-btn');
+    // Show base UI (languages, options needed before structure detection cost calc)
+    show('card-langs'); show('card-options');
+
+    // Structure detection for TXT without clear chapters
+    if (book.needsStructureDetection && book.rawText) {
+      dz.hidden = true;
+      document.getElementById('file-pill').hidden = false;
+      document.getElementById('fp-meta').textContent = `${fmtSize(file.size)} · Detecting structure…`;
+
+      const structure = await detectBookStructure(book.rawText);
+
+      if (structure.type === 'collection' && structure.stories && structure.stories.length > 1) {
+        // Split into individual stories
+        collectionMode = true;
+        const stories = splitIntoStories(book.rawText, structure.stories);
+        if (stories.length > 1) {
+          // Use total word count across all stories
+          book.wordCount = stories.reduce((s, x) => s + x.wordCount, 0);
+          parsedBook = book;
+
+          document.getElementById('fp-meta').textContent =
+            `${fmtSize(file.size)} · Collection · ${stories.length} stories · ${book.wordCount.toLocaleString()} words`;
+
+          const langCount = [...document.querySelectorAll('input[name="lang"]:checked')].length;
+          const imgStyle  = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
+          renderCollectionCard(stories, langCount, imgStyle !== 'none');
+
+          show('card-info'); show('cost-estimate'); show('run-btn');
+          updateCostEstimate();
+          return; // collection handling complete
+        }
+      }
+
+      // Single or chapters — update meta and continue as normal
+      document.getElementById('fp-meta').textContent =
+        `${fmtSize(file.size)} · ${book.chapters.length} chapter(s) · ${book.wordCount.toLocaleString()} words`;
+      collectionMode = false;
+    }
+
+    show('card-info'); show('cost-estimate'); show('run-btn');
     updateCostEstimate();
 
   } catch (err) {
@@ -936,173 +1165,31 @@ const LEVEL_ORDER = ['C2','C1','B2','B1','A2','A1'];
 const LEVEL_KEY   = { B2:'b2', B1:'b1', A2:'a2', A1:'a1' };
 const ALL_LEVELS  = ['original','b2','b1','a2','a1'];
 
+const PIPELINE_STEPS = [
+  { id:'detect',    label:'Detecting original level' },
+  { id:'adapt-b2',  label:'Adapting → B2' },
+  { id:'adapt-b1',  label:'Adapting → B1' },
+  { id:'adapt-a2',  label:'Adapting → A2' },
+  { id:'adapt-a1',  label:'Adapting → A1' },
+  { id:'translate', label:'Translating' },
+  { id:'metadata',  label:'Generating descriptions' },
+  { id:'pack',      label:'Packaging result' },
+];
+
 async function runPipeline(book, settings) {
-  const n   = book.chapters.length;
-  const nL  = settings.languages.length;
-
-  const steps = [
-    { id:'detect',    label:'Detecting original level' },
-    { id:'adapt-b2',  label:`Adapting → B2` },
-    { id:'adapt-b1',  label:`Adapting → B1` },
-    { id:'adapt-a2',  label:`Adapting → A2` },
-    { id:'adapt-a1',  label:`Adapting → A1` },
-    { id:'translate', label:`Translating` },
-    { id:'metadata',  label:'Generating descriptions' },
-    { id:'pack',      label:'Packaging result' },
-  ];
-
-  renderSteps(steps);
+  renderSteps(PIPELINE_STEPS);
   show('card-progress');
   document.getElementById('card-progress').scrollIntoView({ behavior:'smooth' });
 
   try {
-
-    // ── 1. Detect level ────────────────────────────────────────────────────
-    setStep('detect','running');
-    const sample = book.chapters.slice(0,3).map(c=>c.content).join('\n\n');
-    const { level: detectedLevel } = await apiPost('/api/detect-level', { text: sample });
-    book.detectedLevel = detectedLevel;
-    setStep('detect','done', `Detected: ${detectedLevel}`);
-
-    // ── 2-5. Cascade adaptation (English only) ────────────────────────────
-    // chapterTexts[levelKey] = array of strings, one per chapter
-    const chapterTexts = {
-      original: book.chapters.map(c => `[[CHAPTER: ${c.title}]]\n\n${c.content}`),
-    };
-
-    const cascade = [
-      { key:'b2', label:'B2', from: detectedLevel },
-      { key:'b1', label:'B1', from:'B2' },
-      { key:'a2', label:'A2', from:'B1' },
-      { key:'a1', label:'A1', from:'A2' },
-    ];
-
-    for (const { key, label, from } of cascade) {
-      const stepId = `adapt-${key}`;
-
-      // Skip if original is already at this level or simpler
-      if (LEVEL_ORDER.indexOf(label) <= LEVEL_ORDER.indexOf(detectedLevel)) {
-        chapterTexts[key] = chapterTexts.original;
-        setStep(stepId,'done', `Original is ${detectedLevel} — using as-is`);
-        continue;
-      }
-
-      const sourceTexts = key === 'b2'
-        ? chapterTexts.original
-        : chapterTexts[cascade[cascade.findIndex(c=>c.key===key)-1].key];
-
-      setStep(stepId,'running', `0 / ${n} chapters`);
-      let done = 0;
-      const adapted = new Array(n);
-
-      await runBatch(
-        book.chapters.map((_,i) => i),
-        async (i) => {
-          const { text } = await apiPost('/api/adapt', {
-            text:      sourceTexts[i],
-            fromLevel: from,
-            toLevel:   label,
-          });
-          adapted[i] = text;
-          done++;
-          setStep(stepId,'running', `${done} / ${n} chapters`);
-        },
-        3
-      );
-
-      chapterTexts[key] = adapted;
-      setStep(stepId,'done', `${n} chapters`);
-    }
-
-    // ── 6. Translate all levels × all languages ───────────────────────────
-    const totalTasks = ALL_LEVELS.length * nL * n;
-    let translatedCount = 0;
-    setStep('translate','running', `0 / ${totalTasks} chunks`);
-
-    // translations[levelKey][langCode] = array of chapter strings
-    const translations = {};
-    for (const lvl of ALL_LEVELS) {
-      translations[lvl] = { en: chapterTexts[lvl] };
-    }
-
-    // Build task list: { lvl, lang, i }
-    const tasks = [];
-    for (const lvl of ALL_LEVELS)
-      for (const lang of settings.languages)
-        for (let i = 0; i < n; i++)
-          tasks.push({ lvl, lang, i });
-
-    // Pre-allocate arrays
-    for (const lvl of ALL_LEVELS)
-      for (const lang of settings.languages)
-        translations[lvl][lang] = new Array(n);
-
-    await runBatch(tasks, async ({ lvl, lang, i }) => {
-      const { text } = await apiPost('/api/translate', {
-        text: chapterTexts[lvl][i],
-        targetLang: lang,
-        level: lvl,
-      });
-      translations[lvl][lang][i] = text;
-      translatedCount++;
-      setStep('translate','running', `${translatedCount} / ${totalTasks} chunks`);
-    }, 8);
-
-    setStep('translate','done', `${totalTasks} chunks · ${ALL_LEVELS.length} levels · ${nL} languages`);
-
-    // ── 7. Descriptions ───────────────────────────────────────────────────
-    setStep('metadata','running');
-    const excerpt = chapterTexts.original.slice(0,2).join('\n\n');
-    const descriptions = {};
-    const descLangs = ['en', ...settings.languages];
-
-    await runBatch(descLangs, async (lang) => {
-      const { description } = await apiPost('/api/describe', {
-        title: book.title, author: book.author, excerpt, targetLang: lang,
-      });
-      descriptions[lang] = description;
-    }, 4);
-
-    setStep('metadata','done', `${descLangs.length} languages`);
-
-    // ── 8. Pack ───────────────────────────────────────────────────────────
-    setStep('pack','running');
-
-    // Assemble: join chapter arrays into full book text per level/lang
-    const levels = {};
-    for (const lvl of ALL_LEVELS) {
-      levels[lvl] = {};
-      for (const lang of ['en', ...settings.languages]) {
-        if (translations[lvl][lang]) {
-          levels[lvl][lang] = translations[lvl][lang].join('\n\n\n');
-        }
-      }
-    }
-
-    window.bookResults = {
-      meta: {
-        title:          book.title,
-        author:         book.author,
-        slug:           slugify(book.title),
-        detectedLevel,
-        languages:      settings.languages,
-        imageStyle:     settings.imageStyle,
-        chaptersCount:  n,
-      },
-      levels,
-      descriptions,
-      cover: document.getElementById('cover-input').files[0] || null,
-    };
-
-    setStep('pack','done');
-
-    // Show results card
-    renderResultsSummary(window.bookResults);
+    const { results } = await runSingleStory(book, settings);
+    window.bookResults = results;
+    renderResultsSummary(results);
+    hide('results-collection');
+    show('results-single');
     show('card-results');
     document.getElementById('card-results').scrollIntoView({ behavior:'smooth' });
-
   } catch (err) {
-    // Mark any running step as error
     document.querySelectorAll('.ps-icon').forEach(el => {
       if (el.textContent === '⏳') el.textContent = '❌';
     });
@@ -1110,6 +1197,236 @@ async function runPipeline(book, settings) {
   }
 
   resetRunBtn();
+}
+
+// Core pipeline logic — shared by runPipeline and runCollectionPipeline.
+// Returns { results, zipBlob }.
+async function runSingleStory(book, settings) {
+  const n  = book.chapters.length;
+  const nL = settings.languages.length;
+
+  // ── 1. Detect level ────────────────────────────────────────────────────
+  setStep('detect','running');
+  const sample = book.chapters.slice(0,3).map(c=>c.content).join('\n\n');
+  const { level: detectedLevel } = await apiPost('/api/detect-level', { text: sample });
+  book.detectedLevel = detectedLevel;
+  setStep('detect','done', `Detected: ${detectedLevel}`);
+
+  // ── 2-5. Cascade adaptation ────────────────────────────────────────────
+  const chapterTexts = {
+    original: book.chapters.map(c => `[[CHAPTER: ${c.title}]]\n\n${c.content}`),
+  };
+
+  const cascade = [
+    { key:'b2', label:'B2', from: detectedLevel },
+    { key:'b1', label:'B1', from:'B2' },
+    { key:'a2', label:'A2', from:'B1' },
+    { key:'a1', label:'A1', from:'A2' },
+  ];
+
+  for (const { key, label, from } of cascade) {
+    const stepId = `adapt-${key}`;
+
+    if (LEVEL_ORDER.indexOf(label) <= LEVEL_ORDER.indexOf(detectedLevel)) {
+      chapterTexts[key] = chapterTexts.original;
+      setStep(stepId,'done', `Original is ${detectedLevel} — using as-is`);
+      continue;
+    }
+
+    const sourceTexts = key === 'b2'
+      ? chapterTexts.original
+      : chapterTexts[cascade[cascade.findIndex(c=>c.key===key)-1].key];
+
+    setStep(stepId,'running', `0 / ${n} chapters`);
+    let done = 0;
+    const adapted = new Array(n);
+
+    await runBatch(
+      book.chapters.map((_,i) => i),
+      async (i) => {
+        const { text } = await apiPost('/api/adapt', {
+          text:      sourceTexts[i],
+          fromLevel: from,
+          toLevel:   label,
+        });
+        adapted[i] = text;
+        done++;
+        setStep(stepId,'running', `${done} / ${n} chapters`);
+      },
+      3
+    );
+
+    chapterTexts[key] = adapted;
+    setStep(stepId,'done', `${n} chapters`);
+  }
+
+  // ── 6. Translate all levels × all languages ────────────────────────────
+  const totalTasks = ALL_LEVELS.length * nL * n;
+  let translatedCount = 0;
+  setStep('translate','running', `0 / ${totalTasks} chunks`);
+
+  const translations = {};
+  for (const lvl of ALL_LEVELS) translations[lvl] = { en: chapterTexts[lvl] };
+
+  const tasks = [];
+  for (const lvl of ALL_LEVELS)
+    for (const lang of settings.languages)
+      for (let i = 0; i < n; i++)
+        tasks.push({ lvl, lang, i });
+
+  for (const lvl of ALL_LEVELS)
+    for (const lang of settings.languages)
+      translations[lvl][lang] = new Array(n);
+
+  await runBatch(tasks, async ({ lvl, lang, i }) => {
+    const { text } = await apiPost('/api/translate', {
+      text: chapterTexts[lvl][i],
+      targetLang: lang,
+      level: lvl,
+    });
+    translations[lvl][lang][i] = text;
+    translatedCount++;
+    setStep('translate','running', `${translatedCount} / ${totalTasks} chunks`);
+  }, 8);
+
+  setStep('translate','done', `${totalTasks} chunks · ${ALL_LEVELS.length} levels · ${nL} languages`);
+
+  // ── 7. Descriptions ────────────────────────────────────────────────────
+  setStep('metadata','running');
+  const excerpt = chapterTexts.original.slice(0,2).join('\n\n');
+  const descriptions = {};
+  const descLangs = ['en', ...settings.languages];
+
+  await runBatch(descLangs, async (lang) => {
+    const { description } = await apiPost('/api/describe', {
+      title: book.title, author: book.author, excerpt, targetLang: lang,
+    });
+    descriptions[lang] = description;
+  }, 4);
+
+  setStep('metadata','done', `${descLangs.length} languages`);
+
+  // ── 8. Pack ────────────────────────────────────────────────────────────
+  setStep('pack','running');
+
+  const levels = {};
+  for (const lvl of ALL_LEVELS) {
+    levels[lvl] = {};
+    for (const lang of ['en', ...settings.languages]) {
+      if (translations[lvl][lang]) {
+        levels[lvl][lang] = translations[lvl][lang].join('\n\n\n');
+      }
+    }
+  }
+
+  const results = {
+    meta: {
+      title:         book.title,
+      author:        book.author,
+      slug:          slugify(book.title),
+      detectedLevel,
+      languages:     settings.languages,
+      imageStyle:    settings.imageStyle,
+      chaptersCount: n,
+    },
+    levels,
+    descriptions,
+    cover: document.getElementById('cover-input').files[0] || null,
+  };
+
+  const zipBlob = await buildZIPBlob(results);
+  setStep('pack','done');
+
+  return { results, zipBlob };
+}
+
+// ─── COLLECTION PIPELINE ───────────────────────────────────────────────────
+
+async function runCollectionPipeline(stories, author, settings) {
+  collectionResults = [];
+  const total = stories.length;
+  const h2 = document.getElementById('card-progress').querySelector('h2');
+
+  show('card-progress');
+  document.getElementById('card-progress').scrollIntoView({ behavior: 'smooth' });
+
+  for (let idx = 0; idx < stories.length; idx++) {
+    const story = stories[idx];
+    h2.textContent = `Story ${idx + 1} / ${total}: ${story.title}`;
+
+    const storyBook = {
+      title:    story.title,
+      author:   author || '',
+      chapters: [{ title: '', content: story.content }],
+      wordCount: story.wordCount,
+    };
+
+    renderSteps(PIPELINE_STEPS);
+
+    try {
+      const { results, zipBlob } = await runSingleStory(storyBook, settings);
+      collectionResults.push({ title: story.title, slug: results.meta.slug, zip: zipBlob });
+    } catch (err) {
+      document.querySelectorAll('.ps-icon').forEach(el => {
+        if (el.textContent === '⏳') el.textContent = '❌';
+      });
+      collectionResults.push({ title: story.title, slug: slugify(story.title), zip: null, error: err.message });
+      toast(`❌ "${story.title}": ${err.message}`);
+    }
+  }
+
+  h2.textContent = 'Processing';
+  renderCollectionResults();
+  hide('results-single');
+  show('results-collection');
+  show('card-results');
+  document.getElementById('card-results').scrollIntoView({ behavior: 'smooth' });
+  resetRunBtn();
+}
+
+function renderCollectionResults() {
+  const list = document.getElementById('story-results-list');
+  list.innerHTML = collectionResults.map((r, i) => {
+    if (r.error) {
+      return `
+        <div class="story-result">
+          <span class="sr-title">${r.title}</span>
+          <span class="sr-status" style="color:#dc2626">❌ ${r.error}</span>
+        </div>`;
+    }
+    return `
+      <div class="story-result">
+        <span class="sr-title">${r.title}</span>
+        <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
+          onclick="downloadStoryZIP(${i})">⬇️ Download</button>
+      </div>`;
+  }).join('');
+}
+
+function downloadStoryZIP(idx) {
+  const r = collectionResults[idx];
+  if (!r || !r.zip) return;
+  triggerDownload(r.zip, `${r.slug}.zip`);
+}
+
+async function downloadAllCollectionZIP() {
+  const btn = document.getElementById('download-all-btn');
+  btn.disabled = true; btn.textContent = '⏳ Building collection.zip…';
+  try {
+    const parent = new JSZip();
+    for (const r of collectionResults) {
+      if (r.zip) parent.file(`${r.slug}.zip`, r.zip);
+    }
+    const blob = await parent.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+    triggerDownload(blob, 'collection.zip');
+  } catch (err) {
+    toast(`❌ ZIP error: ${err.message}`);
+  }
+  btn.disabled = false; btn.textContent = '⬇️ Download All as collection.zip';
 }
 
 // ─── PIPELINE HELPERS ──────────────────────────────────────────────────────
@@ -1179,6 +1496,57 @@ function setStep(id, state, detail='') {
 
 // ─── ZIP GENERATOR ─────────────────────────────────────────────────────────
 
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a   = document.createElement('a');
+  a.href    = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function buildZIPBlob(r) {
+  const zip  = new JSZip();
+  const root = zip.folder(r.meta.slug);
+
+  // book.json
+  const bookJson = {
+    id:                r.meta.slug,
+    title:             r.meta.title,
+    author:            r.meta.author,
+    original_language: 'en',
+    levels:            ['original','b2','b1','a2','a1'],
+    languages:         ['en', ...r.meta.languages],
+  };
+  root.file('book.json', JSON.stringify(bookJson, null, 2));
+
+  // cover
+  if (r.cover) {
+    const buf = await r.cover.arrayBuffer();
+    root.file('cover.jpg', buf);
+  }
+
+  // descriptions
+  for (const [lang, text] of Object.entries(r.descriptions)) {
+    root.file(`desc.${lang}.txt`, text);
+  }
+
+  // levels
+  const levelsFolder = root.folder('levels');
+  for (const [lvlKey, langs] of Object.entries(r.levels)) {
+    const lvlFolder = levelsFolder.folder(lvlKey);
+    for (const [lang, text] of Object.entries(langs)) {
+      lvlFolder.file(`book.${lang}.txt`, text);
+    }
+  }
+
+  return zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+}
+
 async function downloadZIP() {
   const r = window.bookResults;
   if (!r) return;
@@ -1187,53 +1555,8 @@ async function downloadZIP() {
   btn.disabled = true; btn.textContent = '⏳ Building ZIP…';
 
   try {
-    const zip  = new JSZip();
-    const root = zip.folder(r.meta.slug);
-
-    // book.json
-    const bookJson = {
-      id:                r.meta.slug,
-      title:             r.meta.title,
-      author:            r.meta.author,
-      original_language: 'en',
-      levels:            ['original','b2','b1','a2','a1'],
-      languages:         ['en', ...r.meta.languages],
-    };
-    root.file('book.json', JSON.stringify(bookJson, null, 2));
-
-    // cover
-    if (r.cover) {
-      const buf = await r.cover.arrayBuffer();
-      root.file('cover.jpg', buf);
-    }
-
-    // descriptions
-    for (const [lang, text] of Object.entries(r.descriptions)) {
-      root.file(`desc.${lang}.txt`, text);
-    }
-
-    // levels
-    const levelsFolder = root.folder('levels');
-    for (const [lvlKey, langs] of Object.entries(r.levels)) {
-      const lvlFolder = levelsFolder.folder(lvlKey);
-      for (const [lang, text] of Object.entries(langs)) {
-        lvlFolder.file(`book.${lang}.txt`, text);
-      }
-    }
-
-    // Generate and download
-    const blob = await zip.generateAsync({
-      type: 'blob',
-      compression: 'DEFLATE',
-      compressionOptions: { level: 6 },
-    });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `${r.meta.slug}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
-
+    const blob = await buildZIPBlob(r);
+    triggerDownload(blob, `${r.meta.slug}.zip`);
   } catch (err) {
     toast(`❌ ZIP error: ${err.message}`);
   }
@@ -1478,9 +1801,11 @@ fileInput.addEventListener('change', ()=>{ if (fileInput.files[0]) handleFile(fi
 
 document.getElementById('fp-remove').addEventListener('click', ()=>{
   parsedBook = null; fileInput.value = '';
+  collectionMode = false; collectionStories = []; collectionResults = [];
   document.getElementById('file-pill').hidden = true;
   resetDropZone();
-  ['card-info','card-langs','card-options','cost-estimate','run-btn','card-progress','card-results'].forEach(hide);
+  ['card-collection','card-info','card-langs','card-options','cost-estimate',
+   'run-btn','card-progress','card-results'].forEach(hide);
 });
 
 // Languages
@@ -1508,22 +1833,43 @@ document.querySelectorAll('.style-opt').forEach(opt=>{
 // Run
 document.getElementById('run-btn').addEventListener('click', async ()=>{
   if (!parsedBook) return;
-  const title = document.getElementById('book-title').value.trim();
-  if (!title) { alert('Enter book title'); return; }
   const languages = [...document.querySelectorAll('input[name="lang"]:checked')].map(c=>c.value);
   if (!languages.length) { alert('Select at least one language'); return; }
   const imageStyle = document.querySelector('input[name="img-style"]:checked').value;
-  parsedBook.title  = title;
-  parsedBook.author = document.getElementById('book-author').value.trim();
+  const author = document.getElementById('book-author').value.trim();
   const btn = document.getElementById('run-btn');
   btn.disabled = true; btn.textContent = '⏳ Processing…';
-  await runPipeline(parsedBook, { languages, imageStyle });
+
+  if (collectionMode) {
+    const selected = getSelectedStories();
+    if (!selected.length) { alert('Select at least one story'); btn.disabled=false; btn.textContent='🚀 Start Processing'; return; }
+    await runCollectionPipeline(selected, author, { languages, imageStyle });
+  } else {
+    const title = document.getElementById('book-title').value.trim();
+    if (!title) { alert('Enter book title'); btn.disabled=false; btn.textContent='🚀 Start Processing'; return; }
+    parsedBook.title  = title;
+    parsedBook.author = author;
+    await runPipeline(parsedBook, { languages, imageStyle });
+  }
+});
+
+// Toggle all stories in collection
+document.getElementById('toggle-all-stories').addEventListener('click', () => {
+  const cbs = [...document.querySelectorAll('input[name="story"]')];
+  const all = cbs.every(c => c.checked);
+  cbs.forEach(cb => {
+    cb.checked = !all;
+    cb.closest('.story-item').classList.toggle('selected', !all);
+  });
+  document.getElementById('toggle-all-stories').textContent = all ? 'Select all' : 'Deselect all';
+  updateCollectionTotal();
 });
 
 // Results
 document.getElementById('download-zip-btn').addEventListener('click', downloadZIP);
+document.getElementById('download-all-btn').addEventListener('click', downloadAllCollectionZIP);
 document.getElementById('review-btn').addEventListener('click', () => {
-  toast('Review & Edit coming in Session 3');
+  toast('Review & Edit coming in Session 4');
 });
 
 // Admin

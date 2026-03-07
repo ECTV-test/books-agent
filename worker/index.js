@@ -1,6 +1,6 @@
 // Book Agent — Cloudflare Worker
 // Routes: /api/auth, /api/config, /api/provider, /api/admin/auth,
-//         /api/detect-level, /api/adapt, /api/translate, /api/describe
+//         /api/structure, /api/detect-level, /api/adapt, /api/translate, /api/describe
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -62,6 +62,7 @@ export default {
 
       if (pathname === '/api/config'        && request.method === 'GET')  return getConfig(env);
       if (pathname === '/api/provider'      && request.method === 'POST') return setProvider(request, env);
+      if (pathname === '/api/structure'     && request.method === 'POST') return detectStructure(request, env);
       if (pathname === '/api/detect-level'  && request.method === 'POST') return detectLevel(request, env);
       if (pathname === '/api/adapt'         && request.method === 'POST') return adapt(request, env);
       if (pathname === '/api/translate'     && request.method === 'POST') return translate(request, env);
@@ -124,6 +125,56 @@ async function setProvider(request, env) {
   if (!ALLOWED_PROVIDERS.includes(provider)) return json({ error: 'Invalid provider' }, 400);
   await env.KV.put('active_provider', provider);
   return json({ ok: true, provider });
+}
+
+// ─── Structure detection ─────────────────────────────────────────────────────
+
+async function detectStructure(request, env) {
+  const { sample, candidates } = await request.json();
+  // sample: first ~6000 chars of cleaned text
+  // candidates: standalone short lines from the full text (potential story titles)
+
+  const result = await openai(env.OPENAI_API_KEY, {
+    model: 'gpt-4o-mini',
+    messages: [
+      {
+        role: 'system',
+        content: `You analyze the structure of literary texts. Return ONLY valid JSON, no other text.
+
+Determine the structure type:
+- "single": one story or book (may have named chapters, but one unified narrative)
+- "collection": multiple independent stories/essays, each with its own title
+- "chapters": one book divided into named chapters
+
+If "collection": list ONLY the story titles that are actual story/essay titles, IN ORDER.
+Use the exact title text as it appears in the candidates list.
+
+Return JSON:
+{"type":"collection","stories":["Title 1","Title 2",...]}
+or
+{"type":"single"}
+or
+{"type":"chapters"}`,
+      },
+      {
+        role: 'user',
+        content: `Text beginning (first 6000 chars):\n${sample}\n\n---\nStandalone short lines found throughout the text (potential titles):\n${candidates.map((c, i) => `${i + 1}. ${c}`).join('\n')}`,
+      },
+    ],
+    max_tokens: 600,
+    temperature: 0,
+    response_format: { type: 'json_object' },
+  });
+
+  try {
+    const data = JSON.parse(result.choices[0].message.content);
+    return json({
+      type:    data.type || 'single',
+      stories: data.stories || [],
+    });
+  } catch {
+    return json({ type: 'single', stories: [] });
+  }
 }
 
 // ─── Detect level ────────────────────────────────────────────────────────────
