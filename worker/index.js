@@ -141,13 +141,21 @@ async function adapt(request, env) {
         content: `You are an expert English language teacher adapting literary texts for learners.
 Adapt the text from ${fromLevel} to ${LEVEL_PROMPTS[toLevel]}.
 
-Rules:
+Content rules:
 - Keep ALL story events, characters, and plot intact — nothing removed
 - Replace complex words with simpler synonyms appropriate for the target level
 - Shorten sentences as needed for the target level
-- Keep [[CHAPTER: ...]] markers exactly as they appear
 - Keep proper names unchanged
-- Output ONLY the adapted text, no comments or explanations`,
+
+Formatting rules (strict):
+- Each sentence must be on its own line
+- Each speaker's dialogue must start on a new line
+- Leave one blank line between paragraphs
+- A paragraph should contain 1–3 sentences maximum
+- Never merge sentences into long lines — break by meaning, not character count
+- Keep [[CHAPTER: ...]] markers exactly as they appear, on their own line
+
+Output ONLY the adapted text, no comments or explanations.`,
       },
       { role: 'user', content: text },
     ],
@@ -180,10 +188,17 @@ async function translateOpenAI(text, targetLang, env) {
         role: 'system',
         content: `You are a professional literary translator. Translate the English text to ${langName}.
 
-Rules:
+Content rules:
 - Preserve style, tone, and meaning exactly
 - Keep [[CHAPTER: ...]] markers — translate only the chapter name inside them
-- Output ONLY the translation, no explanations`,
+
+Formatting rules (strict — preserve exactly):
+- Each sentence must remain on its own line — do not merge lines
+- Keep blank lines between paragraphs exactly as in the source
+- Each speaker's dialogue must start on a new line
+- Do not add or remove line breaks — mirror the source structure
+
+Output ONLY the translation, no explanations.`,
       },
       { role: 'user', content: text },
     ],

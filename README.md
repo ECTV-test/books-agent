@@ -198,7 +198,8 @@ const WORKER_URL = 'https://book-agent-worker.YOUR_SUBDOMAIN.workers.dev';
 | ✅ 1 | Worker, KV, EPUB/TXT парсер, UI (upload → settings → progress), admin-панель с паролем |
 | ✅ 2 | Полный пайплайн: detect level → cascade adaptation → parallel translation → descriptions → ZIP download |
 | ✅ 2.5 | Авторизация редакторов: логин-страница (`EDITOR_PASSWORD`), `X-Editor-Token` header, logout, 401 auto-redirect |
-| 🔜 3 | Review UI: side-by-side просмотр, редактирование, финальный экспорт |
+| ✅ 2.6 | Препроцесор: Gutenberg-клінер (TXT), правила форматування в промптах (речення на окремих рядках) |
+| 🔜 3 | Детекція збірки (GPT), розбивка на окремі книги, Review UI |
 
 ## Пайплайн (Сессия 2)
 

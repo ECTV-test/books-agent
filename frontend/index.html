@@ -719,10 +719,45 @@ function htmlToText(html) {
     .replace(/\n{3,}/g,'\n\n').trim();
 }
 
+// ─── GUTENBERG CLEANER ─────────────────────────────────────────────────────
+
+function cleanGutenberg(text) {
+  // Remove everything before "*** START OF" (Gutenberg header/license)
+  text = text.replace(/^[\s\S]*?\*{3,}\s*START OF[^\n]*\n/im, '');
+
+  // Remove everything after "*** END OF" (Gutenberg footer)
+  text = text.replace(/\*{3,}\s*END OF[\s\S]*$/im, '');
+
+  // Remove [Footnote: ...] — single and multi-line
+  text = text.replace(/\[Footnote[^\]]*\]/gi, '');
+  text = text.replace(/\[Footnote:[^\[]*?\]/gis, '');
+
+  // Remove [Illustration: ...]
+  text = text.replace(/\[Illustration[^\]]*\]/gi, '');
+
+  // Remove table of contents lines: "Some Title......12" or "CHAPTER I.....3"
+  text = text.replace(/^[A-Z][^\n]{0,60}\.{3,}\s*\d+\s*$/gm, '');
+
+  // Remove standalone page numbers (lines with only a number)
+  text = text.replace(/^\s*\d{1,4}\s*$/gm, '');
+
+  // Remove producer/transcriber notes blocks (common Gutenberg patterns)
+  text = text.replace(/\[Transcriber['']?s? [Nn]ote[\s\S]*?\]/g, '');
+  text = text.replace(/\[Editor['']?s? [Nn]ote[\s\S]*?\]/g, '');
+
+  // Collapse 3+ blank lines into 2
+  text = text.replace(/\n{4,}/g, '\n\n\n');
+
+  return text.trim();
+}
+
 // ─── TXT PARSER ────────────────────────────────────────────────────────────
 
 async function parseTXT(file) {
-  const text = await file.text();
+  let text = await file.text();
+
+  // Clean Gutenberg boilerplate before parsing
+  text = cleanGutenberg(text);
 
   if (text.includes('[[CHAPTER:')) {
     const markers  = [...text.matchAll(/\[\[CHAPTER:([^\]]*)\]\]/g)];
