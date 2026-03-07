@@ -193,6 +193,32 @@
     .so-icon { font-size: 26px; margin-bottom: 6px; }
     .so-name { font-size: 13px; font-weight: 500; }
 
+    /* ── Cost estimate ── */
+    #cost-estimate {
+      background: white;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 16px;
+      align-items: baseline;
+    }
+    .ce-label { font-size: 13px; color: #86868b; }
+    .ce-total { font-size: 22px; font-weight: 700; color: #0071e3; }
+    .ce-breakdown {
+      font-size: 12px;
+      color: #86868b;
+      width: 100%;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+    .ce-item { display: flex; gap: 4px; align-items: center; }
+    .ce-item b { color: #1d1d1f; }
+
     /* ── Run button ── */
     #run-btn {
       width: 100%;
@@ -548,6 +574,9 @@
     </div>
   </div>
 
+  <!-- Cost estimate -->
+  <div id="cost-estimate" hidden></div>
+
   <!-- Run -->
   <button id="run-btn" hidden>🚀 Start Processing</button>
 
@@ -660,8 +689,68 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 // ─── CONFIG ────────────────────────────────────────────────────────────────
-// Replace with your Worker URL after deploying:
 const WORKER_URL = 'https://books-agent.englishclubsales.workers.dev';
+
+// OpenAI pricing (per 1M tokens), DALL-E 3 per image
+const PRICING = {
+  gpt4o_in:       2.50,   // adapt (GPT-4o)
+  gpt4o_out:     10.00,
+  mini_in:        0.15,   // translate + describe (GPT-4o-mini)
+  mini_out:       0.60,
+  dalle3:         0.04,   // per image, standard quality 1024×1024
+  tokens_per_word: 1.3,   // average tokens per English word
+};
+
+function estimateCost(wordCount, chaptersCount, langCount, includeImages) {
+  const T = wordCount * PRICING.tokens_per_word;
+
+  // Adaptation: 4 levels (cascade), each ~same size as source, GPT-4o
+  // input ≈ source chapter + prompt overhead, output ≈ adapted chapter
+  const adaptCost = 4 * (T * PRICING.gpt4o_in + T * PRICING.gpt4o_out) / 1_000_000;
+
+  // Translation: 5 levels × langCount, GPT-4o-mini
+  const translateCost = 5 * langCount * (T * PRICING.mini_in + T * PRICING.mini_out) / 1_000_000;
+
+  // Descriptions: (langCount + 1) langs × ~300 tokens in + 150 out
+  const descCost = (langCount + 1) * (300 * PRICING.mini_in + 150 * PRICING.mini_out) / 1_000_000;
+
+  // Images: 1 per chapter × DALL-E 3 price
+  const imageCost = includeImages ? chaptersCount * PRICING.dalle3 : 0;
+
+  return {
+    adapt:       adaptCost,
+    translate:   translateCost,
+    desc:        descCost,
+    images:      imageCost,
+    total:       adaptCost + translateCost + descCost + imageCost,
+  };
+}
+
+function updateCostEstimate() {
+  const el = document.getElementById('cost-estimate');
+  if (!el || !parsedBook) return;
+
+  const langCount    = [...document.querySelectorAll('input[name="lang"]:checked')].length;
+  const imageStyle   = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
+  const includeImages = imageStyle !== 'none';
+  const words        = parsedBook.wordCount || 0;
+  const chapters     = parsedBook.chapters.length;
+
+  const c = estimateCost(words, chapters, langCount, includeImages);
+
+  el.innerHTML = `
+    <div>
+      <span class="ce-label">💰 Estimated cost</span>
+    </div>
+    <div class="ce-total">~$${c.total.toFixed(2)}</div>
+    <div class="ce-breakdown">
+      <span class="ce-item">📖 <b>${words.toLocaleString()}</b> words · ${chapters} chapters</span>
+      <span class="ce-item">⚡ Adapt <b>$${c.adapt.toFixed(2)}</b></span>
+      <span class="ce-item">🌍 Translate ×${langCount} <b>$${c.translate.toFixed(2)}</b></span>
+      ${includeImages ? `<span class="ce-item">🎨 Images ×${chapters} <b>$${c.images.toFixed(2)}</b></span>` : ''}
+    </div>
+  `;
+}
 
 // ─── STATE ─────────────────────────────────────────────────────────────────
 let parsedBook    = null;
@@ -807,6 +896,9 @@ async function handleFile(file) {
     const ext  = file.name.split('.').pop().toLowerCase();
     if (!['epub','txt'].includes(ext)) throw new Error('Use EPUB or TXT');
     const book = ext === 'epub' ? await parseEPUB(file) : await parseTXT(file);
+
+    // Count total words across all chapters
+    book.wordCount = book.chapters.reduce((sum, c) => sum + c.content.split(/\s+/).filter(Boolean).length, 0);
     parsedBook = book;
 
     dz.hidden = true;
@@ -814,7 +906,8 @@ async function handleFile(file) {
     pill.hidden = false;
     document.getElementById('fp-icon').textContent = ext === 'epub' ? '📕' : '📄';
     document.getElementById('fp-name').textContent = file.name;
-    document.getElementById('fp-meta').textContent = `${fmtSize(file.size)} · ${book.chapters.length} chapters`;
+    document.getElementById('fp-meta').textContent =
+      `${fmtSize(file.size)} · ${book.chapters.length} chapters · ${book.wordCount.toLocaleString()} words`;
 
     document.getElementById('book-title').value  = book.title  || '';
     document.getElementById('book-author').value = book.author || '';
@@ -822,7 +915,8 @@ async function handleFile(file) {
       ? `✅ Metadata from EPUB: "${book.title}" — ${book.author || 'Unknown'}`
       : '⚠️ No metadata — fill in title and author manually';
 
-    show('card-info'); show('card-langs'); show('card-options'); show('run-btn');
+    show('card-info'); show('card-langs'); show('card-options'); show('cost-estimate'); show('run-btn');
+    updateCostEstimate();
 
   } catch (err) {
     dz.innerHTML = `<div class="dz-icon">❌</div><div class="dz-label">${err.message}</div>`;
@@ -1386,7 +1480,7 @@ document.getElementById('fp-remove').addEventListener('click', ()=>{
   parsedBook = null; fileInput.value = '';
   document.getElementById('file-pill').hidden = true;
   resetDropZone();
-  ['card-info','card-langs','card-options','run-btn','card-progress','card-results'].forEach(hide);
+  ['card-info','card-langs','card-options','cost-estimate','run-btn','card-progress','card-results'].forEach(hide);
 });
 
 // Languages
@@ -1394,6 +1488,12 @@ document.getElementById('toggle-all-langs').addEventListener('click', ()=>{
   const cbs  = [...document.querySelectorAll('input[name="lang"]')];
   const all  = cbs.every(c=>c.checked);
   cbs.forEach(c=>c.checked=!all);
+  updateCostEstimate();
+});
+
+// Update cost when individual language changes
+document.querySelectorAll('input[name="lang"]').forEach(cb => {
+  cb.addEventListener('change', updateCostEstimate);
 });
 
 // Image style
@@ -1401,6 +1501,7 @@ document.querySelectorAll('.style-opt').forEach(opt=>{
   opt.addEventListener('click', ()=>{
     document.querySelectorAll('.style-opt').forEach(o=>o.classList.remove('selected'));
     opt.classList.add('selected');
+    updateCostEstimate();
   });
 });
 
