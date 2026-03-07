@@ -728,9 +728,11 @@ function cleanGutenberg(text) {
   // Remove everything after "*** END OF" (Gutenberg footer)
   text = text.replace(/\*{3,}\s*END OF[\s\S]*$/im, '');
 
-  // Remove [Footnote: ...] — single and multi-line
+  // Remove [Footnote: ...] and [Note: ...] — single and multi-line
   text = text.replace(/\[Footnote[^\]]*\]/gi, '');
-  text = text.replace(/\[Footnote:[^\[]*?\]/gis, '');
+  text = text.replace(/\[Footnote:[\s\S]*?\]/gis, '');
+  text = text.replace(/\[Note:[^\]]*\]/gi, '');
+  text = text.replace(/\[Note:[\s\S]*?\]/gis, '');
 
   // Remove [Illustration: ...]
   text = text.replace(/\[Illustration[^\]]*\]/gi, '');
@@ -741,9 +743,15 @@ function cleanGutenberg(text) {
   // Remove standalone page numbers (lines with only a number)
   text = text.replace(/^\s*\d{1,4}\s*$/gm, '');
 
-  // Remove producer/transcriber notes blocks (common Gutenberg patterns)
+  // Remove producer/transcriber/editor notes
   text = text.replace(/\[Transcriber['']?s? [Nn]ote[\s\S]*?\]/g, '');
   text = text.replace(/\[Editor['']?s? [Nn]ote[\s\S]*?\]/g, '');
+
+  // Remove Gutenberg metadata lines (release date, eBook number, URLs, credits)
+  text = text.replace(/^(Release Date|Posting Date|Last Updated|Language|Character set encoding|Credits|Produced by|Updated editions|Etext|eBook)\s*:.*$/gim, '');
+  text = text.replace(/^.*gutenberg\.org.*$/gim, '');
+  text = text.replace(/^.*@gutenberg.*$/gim, '');
+  text = text.replace(/^\s*eBook\s*#?\s*\d+\s*$/gim, '');
 
   // Collapse 3+ blank lines into 2
   text = text.replace(/\n{4,}/g, '\n\n\n');
@@ -939,6 +947,7 @@ async function runPipeline(book, settings) {
       const { text } = await apiPost('/api/translate', {
         text: chapterTexts[lvl][i],
         targetLang: lang,
+        level: lvl,
       });
       translations[lvl][lang][i] = text;
       translatedCount++;
@@ -1089,12 +1098,12 @@ async function downloadZIP() {
 
     // book.json
     const bookJson = {
-      id:       r.meta.slug,
-      title:    r.meta.title,
-      author:   r.meta.author,
-      language: 'en',
-      levels:   ['original','b2','b1','a2','a1'],
-      languages: ['en', ...r.meta.languages],
+      id:                r.meta.slug,
+      title:             r.meta.title,
+      author:            r.meta.author,
+      original_language: 'en',
+      levels:            ['original','b2','b1','a2','a1'],
+      languages:         ['en', ...r.meta.languages],
     };
     root.file('book.json', JSON.stringify(bookJson, null, 2));
 

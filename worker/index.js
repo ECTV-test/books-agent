@@ -17,10 +17,30 @@ const LANG_NAMES = {
 };
 
 const LEVEL_PROMPTS = {
-  A1: 'A1 (absolute beginner): max 500 most common words, sentences max 8 words, present tense only, no idioms',
-  A2: 'A2 (elementary): max 1500 common words, sentences max 12 words, simple past/present, no complex grammar',
-  B1: 'B1 (intermediate): everyday vocabulary, sentences max 18 words, standard tenses, minimal idioms',
-  B2: 'B2 (upper-intermediate): natural vocabulary, varied sentence structure, all common tenses, some idioms',
+  B2: `B2 (upper intermediate):
+- Simplify complex sentence structures while preserving literary style
+- Replace rare or archaic vocabulary with common modern equivalents
+- Keep idioms where their meaning is clear from context
+- Preserve the author's tone: if the original is humorous — keep the humor; if dramatic — keep the drama`,
+
+  B1: `B1 (intermediate):
+- Use only common vocabulary (top 5000 most frequent English words)
+- Maximum 20 words per sentence — break longer sentences into shorter ones
+- Replace idioms by rewriting them plainly in simple language
+- Keep descriptive passages but simplify the language`,
+
+  A2: `A2 (elementary):
+- Use only high-frequency vocabulary (top 2000 most frequent English words)
+- Maximum 15 words per sentence
+- No idioms — replace with literal, simple descriptions
+- Keep only essential plot elements; reduce lengthy descriptions`,
+
+  A1: `A1 (beginner):
+- Use only the most basic vocabulary (top 1000 most frequent English words)
+- Maximum 10 words per sentence
+- Use present tense wherever possible
+- Use Subject-Verb-Object structure only
+- After writing each sentence, ask: "Can a complete beginner understand this?" — if not, rewrite it`,
 };
 
 // ─── Router ─────────────────────────────────────────────────────────────────
@@ -139,20 +159,22 @@ async function adapt(request, env) {
       {
         role: 'system',
         content: `You are an expert English language teacher adapting literary texts for learners.
-Adapt the text from ${fromLevel} to ${LEVEL_PROMPTS[toLevel]}.
+Adapt the following ${fromLevel}-level English text to ${toLevel} level.
+
+Target level requirements:
+${LEVEL_PROMPTS[toLevel]}
 
 Content rules:
-- Keep ALL story events, characters, and plot intact — nothing removed
-- Replace complex words with simpler synonyms appropriate for the target level
-- Shorten sentences as needed for the target level
-- Keep proper names unchanged
+- Preserve ALL story events, characters, and plot — nothing removed, nothing added
+- NEVER change character names — keep them exactly as in the original (e.g. "Stuffy Pete" stays "Stuffy Pete")
+- NEVER translate or localize proper nouns — character names, place names, institution names stay in English
+- Preserve the author's tone completely — if the original is humorous, keep the humor; if dramatic, keep the drama
+- Preserve stylistic devices: irony, metaphors, imagery — simplify language but not the style
 
 Formatting rules (strict):
-- Each sentence must be on its own line
-- Each speaker's dialogue must start on a new line
-- Leave one blank line between paragraphs
-- A paragraph should contain 1–3 sentences maximum
-- Never merge sentences into long lines — break by meaning, not character count
+- Each sentence on its own line
+- Each speaker's dialogue starts on a new line
+- One blank line between paragraphs
 - Keep [[CHAPTER: ...]] markers exactly as they appear, on their own line
 
 Output ONLY the adapted text, no comments or explanations.`,
@@ -168,18 +190,42 @@ Output ONLY the adapted text, no comments or explanations.`,
 // ─── Translate ───────────────────────────────────────────────────────────────
 
 async function translate(request, env) {
-  const { text, targetLang } = await request.json();
+  const { text, targetLang, level } = await request.json();
   const provider = await env.KV.get('active_provider') || 'openai';
 
-  if (provider === 'openai')  return translateOpenAI(text, targetLang, env);
-  // if (provider === 'google') return translateGoogle(text, targetLang, env);
-  // if (provider === 'claude') return translateClaude(text, targetLang, env);
+  if (provider === 'openai')  return translateOpenAI(text, targetLang, level, env);
+  // if (provider === 'google') return translateGoogle(text, targetLang, level, env);
+  // if (provider === 'claude') return translateClaude(text, targetLang, level, env);
 
   return json({ error: `Provider "${provider}" not yet implemented` }, 400);
 }
 
-async function translateOpenAI(text, targetLang, env) {
+const TRANSLATE_LEVEL_INSTRUCTIONS = {
+  original: (lang) => `This is the original literary text. Translate it as a full literary translation:
+- The result must feel like it was written in ${lang}, not translated from English
+- Preserve the author's voice, rhythm, sentence variety, and stylistic devices
+- Preserve metaphors, irony, humor — find the target-language equivalent, not a literal version`,
+
+  b2: (lang) => `This is a B2-level (upper intermediate) text. Translate naturally:
+- Preserve literary style while using clear, accessible ${lang}
+- Keep the author's tone`,
+
+  b1: (lang) => `This is a B1-level (intermediate) simplified text:
+- Use common, everyday vocabulary in ${lang}
+- Match the simplicity of the English source — no complex expressions`,
+
+  a2: (lang) => `This is an A2-level (elementary) text:
+- Use simple, high-frequency vocabulary in ${lang}
+- Keep sentences short and clear`,
+
+  a1: (lang) => `This is an A1-level (beginner) text:
+- Use only the most basic vocabulary in ${lang}
+- Very short sentences, simple Subject-Verb-Object structure`,
+};
+
+async function translateOpenAI(text, targetLang, level, env) {
   const langName = LANG_NAMES[targetLang] || targetLang;
+  const levelInstructions = (TRANSLATE_LEVEL_INSTRUCTIONS[level] || TRANSLATE_LEVEL_INSTRUCTIONS.original)(langName);
 
   const result = await openai(env.OPENAI_API_KEY, {
     model: 'gpt-4o-mini',
@@ -188,17 +234,20 @@ async function translateOpenAI(text, targetLang, env) {
         role: 'system',
         content: `You are a professional literary translator. Translate the English text to ${langName}.
 
-Content rules:
-- Preserve style, tone, and meaning exactly
+${levelInstructions}
+
+Name rules (strict):
+- NEVER translate character names — transliterate them to ${langName} phonetically if needed (e.g. "Stuffy Pete" → phonetic equivalent, NOT a translation of the meaning)
+- Place names: keep English or use established local equivalents
+- A name must be identical in every level of the same book
+
+Formatting rules (preserve exactly):
+- Each sentence remains on its own line — do not merge lines
+- Keep blank lines between paragraphs exactly as in the source
+- Each speaker's dialogue starts on a new line
 - Keep [[CHAPTER: ...]] markers — translate only the chapter name inside them
 
-Formatting rules (strict — preserve exactly):
-- Each sentence must remain on its own line — do not merge lines
-- Keep blank lines between paragraphs exactly as in the source
-- Each speaker's dialogue must start on a new line
-- Do not add or remove line breaks — mirror the source structure
-
-Output ONLY the translation, no explanations.`,
+Output ONLY the translation, no notes or explanations.`,
       },
       { role: 'user', content: text },
     ],
@@ -219,7 +268,12 @@ async function describe(request, env) {
     messages: [
       {
         role: 'system',
-        content: `Write a short book description (2–3 sentences, max 60 words) in ${langName} for the book "${title}" by ${author}. Output ONLY the description text.`,
+        content: `Write a 2–3 sentence description (max 60 words) in ${langName} for the book "${title}" by ${author}.
+Rules:
+- Do NOT reveal the ending or any plot twists
+- Match the tone of the original: if the story is humorous — write a fun, engaging description; if dramatic — match that mood
+- Make the reader want to read the book
+Output ONLY the description text, no labels or notes.`,
       },
       { role: 'user', content: `Book excerpt:\n${excerpt.slice(0, 3000)}` },
     ],
