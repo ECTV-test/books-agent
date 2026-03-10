@@ -853,9 +853,13 @@ function extractTitleCandidates(text) {
 function splitIntoStories(text, titles) {
   const stories = [];
   const lowerText = text.toLowerCase();
+  // Lowercase set of all titles for TOC-detection
+  const titlesLC = new Set(titles.map(t => t.toLowerCase().trim()));
 
-  // Find the best occurrence of a title: first one followed by substantial content.
-  // This skips Table-of-Contents entries (only a short next-title follows them).
+  // Find the occurrence of `title` that represents an actual story heading,
+  // not a Table-of-Contents entry.
+  // A TOC entry is detected when the very next non-empty line after the title
+  // is itself one of the known titles (i.e. another TOC line).
   function locateTitle(title) {
     const lc = title.toLowerCase();
     let start = 0;
@@ -864,12 +868,22 @@ function splitIntoStories(text, titles) {
       const idx = lowerText.indexOf(lc, start);
       if (idx === -1) break;
       if (firstFound === -1) firstFound = idx;
-      // Check how much content follows the title line
+
+      // Find next non-empty line after this occurrence
       const lineEnd = text.indexOf('\n', idx + lc.length);
       if (lineEnd === -1) return idx; // end of file — use it
-      const ahead = text.slice(lineEnd, Math.min(lineEnd + 350, text.length)).trim();
-      if (ahead.length > 150) return idx; // substantial content → real story start
-      start = idx + 1;
+
+      const afterLines = text.slice(lineEnd + 1).split('\n');
+      const nextNonEmpty = afterLines.find(l => l.trim());
+      if (!nextNonEmpty) return idx; // nothing follows → story heading
+
+      // If the next non-empty line exactly matches another known title → TOC entry, skip
+      if (titlesLC.has(nextNonEmpty.trim().toLowerCase())) {
+        start = idx + 1;
+        continue;
+      }
+
+      return idx; // next line is prose → real story start
     }
     return firstFound; // fallback: first occurrence
   }
@@ -1538,6 +1552,32 @@ function setStep(id, state, detail='') {
   if (det)  det.textContent   = detail;
 }
 
+// ─── BLOCK NORMALISER ──────────────────────────────────────────────────────
+// Merge very short non-dialogue paragraphs (< minLen chars) into the next one
+// so the reader shows consistently-sized ~2-line blocks.
+// Dialogue lines (starting with " " " — –) are never merged.
+function normalizeBlocks(text, minLen = 80) {
+  const DIALOGUE_RE = /^[\u201c\u201e""\u2014\u2013—–-]/;
+  const paras = text.split(/\n{2,}/);
+  const out   = [];
+  let buf     = '';
+
+  for (const raw of paras) {
+    const p = raw.trim();
+    if (!p) continue;
+
+    const bothProse = buf && !DIALOGUE_RE.test(buf) && !DIALOGUE_RE.test(p);
+    if (bothProse && buf.length < minLen && buf.length + p.length + 2 <= 220) {
+      buf = buf + '\n' + p;   // join with soft newline (same paragraph block)
+    } else {
+      if (buf) out.push(buf);
+      buf = p;
+    }
+  }
+  if (buf) out.push(buf);
+  return out.join('\n\n');
+}
+
 // ─── ZIP GENERATOR ─────────────────────────────────────────────────────────
 
 function triggerDownload(blob, filename) {
@@ -1580,7 +1620,10 @@ async function buildZIPBlob(r) {
   for (const [lvlKey, langs] of Object.entries(r.levels)) {
     const lvlFolder = levelsFolder.folder(lvlKey);
     for (const [lang, text] of Object.entries(langs)) {
-      lvlFolder.file(`book.${lang}.txt`, text);
+      // Normalise paragraph block sizes for reader display consistency.
+      // Original level: preserve as-is. Adapted levels: merge short blocks.
+      const stored = lvlKey === 'original' ? text : normalizeBlocks(text);
+      lvlFolder.file(`book.${lang}.txt`, stored);
     }
   }
 
