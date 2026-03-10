@@ -854,15 +854,29 @@ function splitIntoStories(text, titles) {
   const stories = [];
   const lowerText = text.toLowerCase();
 
-  const positions = titles.map(title => {
-    // 1. Exact match
-    let idx = text.indexOf(title);
-    if (idx !== -1) return { title, idx };
-    // 2. Case-insensitive fallback (GPT may normalise casing)
+  // Find the best occurrence of a title: first one followed by substantial content.
+  // This skips Table-of-Contents entries (only a short next-title follows them).
+  function locateTitle(title) {
     const lc = title.toLowerCase();
-    idx = lowerText.indexOf(lc);
-    if (idx !== -1) return { title: text.slice(idx, idx + title.length), idx };
-    return { title, idx: -1 };
+    let start = 0;
+    let firstFound = -1;
+    while (start < text.length) {
+      const idx = lowerText.indexOf(lc, start);
+      if (idx === -1) break;
+      if (firstFound === -1) firstFound = idx;
+      // Check how much content follows the title line
+      const lineEnd = text.indexOf('\n', idx + lc.length);
+      if (lineEnd === -1) return idx; // end of file — use it
+      const ahead = text.slice(lineEnd, Math.min(lineEnd + 350, text.length)).trim();
+      if (ahead.length > 150) return idx; // substantial content → real story start
+      start = idx + 1;
+    }
+    return firstFound; // fallback: first occurrence
+  }
+
+  const positions = titles.map(title => {
+    const idx = locateTitle(title);
+    return { title, idx };
   }).filter(p => p.idx !== -1).sort((a, b) => a.idx - b.idx);
 
   // Remove duplicate positions (same idx keeps first)
