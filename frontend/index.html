@@ -519,6 +519,54 @@
     #logout-btn:hover { border-color: #dc2626; color: #dc2626; }
     #logout-btn.visible { display: inline-block; }
 
+    /* ── Viewer (Stage 3) ── */
+    .viewer-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .v-tab {
+      padding: 5px 14px; border-radius: 20px; border: 1.5px solid #d2d2d7;
+      background: white; cursor: pointer; font-size: 12px; font-weight: 600;
+      color: #3d3d3d; transition: all 0.15s; white-space: nowrap;
+    }
+    .v-tab:hover  { border-color: #0071e3; color: #0071e3; }
+    .v-tab.active { background: #0071e3; color: white; border-color: #0071e3; }
+    .v-tab-langs  { margin-bottom: 16px; }
+    .viewer-body  {
+      display: grid; grid-template-columns: 200px 1fr; gap: 12px;
+      min-height: 420px;
+    }
+    @media (max-width: 600px) { .viewer-body { grid-template-columns: 1fr; } }
+    .viewer-chaplist {
+      border: 1px solid #e5e7eb; border-radius: 10px; overflow-y: auto;
+      max-height: 500px;
+    }
+    .v-chap-item {
+      padding: 9px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0;
+      font-size: 12px; line-height: 1.35; transition: background 0.1s;
+    }
+    .v-chap-item:last-child { border-bottom: none; }
+    .v-chap-item:hover  { background: #f5f5f7; }
+    .v-chap-item.active { background: #e8f0fe; }
+    .v-chap-num   { color: #86868b; font-size: 10px; margin-bottom: 2px; }
+    .v-chap-lbl   { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .viewer-right { display: flex; flex-direction: column; gap: 8px; }
+    .v-ch-title   { font-size: 13px; font-weight: 700; color: #1d1d1f; }
+    .v-ch-text    {
+      flex: 1; width: 100%; min-height: 380px; padding: 12px 14px;
+      border: 1.5px solid #d2d2d7; border-radius: 10px;
+      font-size: 13px; line-height: 1.7; font-family: inherit;
+      resize: vertical; outline: none; transition: border-color 0.2s;
+    }
+    .v-ch-text:focus { border-color: #0071e3; }
+    .v-saved { color: #34c759; font-size: 12px; display: none; }
+
+    /* ── Model select ── */
+    .model-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .model-row label { font-size: 13px; font-weight: 600; min-width: 120px; }
+    .model-select {
+      flex: 1; padding: 8px 10px; border: 1.5px solid #d2d2d7; border-radius: 8px;
+      font-size: 13px; font-family: inherit; outline: none; background: white;
+    }
+    .model-select:focus { border-color: #0071e3; }
+
     /* Utils */
     [hidden] { display: none !important; }
   </style>
@@ -553,6 +601,11 @@
       </div>
       <button class="fp-remove" id="fp-remove">Remove</button>
     </div>
+    <!-- EPUB collection mode toggle (shown for EPUBs with many chapters) -->
+    <div id="epub-collection-banner" hidden style="margin-top:10px;padding:10px 14px;background:#f0f6ff;border:1px solid #cce0ff;border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span style="font-size:13px">📚 Looks like a story collection. Process each chapter as a separate story?</span>
+      <button class="btn-secondary" id="epub-use-collection-btn" type="button" style="font-size:12px;padding:6px 14px;white-space:nowrap">Use collection mode</button>
+    </div>
     <input type="file" id="file-input" accept=".epub,.txt" hidden>
   </div>
 
@@ -585,7 +638,14 @@
     </div>
     <div class="form-group">
       <label>Cover image (optional)</label>
-      <input type="file" id="cover-input" accept="image/*">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="cover-input" accept="image/*" style="flex:1;min-width:0">
+        <button class="btn-secondary" id="gen-cover-btn" type="button" style="white-space:nowrap;padding:8px 14px;font-size:13px">✨ Generate</button>
+      </div>
+      <div id="cover-preview" style="margin-top:8px;display:none">
+        <img id="cover-img-preview" style="width:120px;height:160px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">
+        <span style="font-size:12px;color:#86868b;margin-left:8px" id="cover-status"></span>
+      </div>
     </div>
     <div class="parsed-hint" id="parsed-hint"></div>
   </div>
@@ -652,13 +712,37 @@
     <!-- Single book -->
     <div class="results-actions" id="results-single">
       <button class="btn-primary" id="download-zip-btn">⬇️ Download ZIP</button>
-      <button class="btn-secondary" id="review-btn">🔍 Review &amp; Edit — Session 4</button>
+      <button class="btn-secondary" id="review-btn">🔍 Review &amp; Edit</button>
     </div>
     <!-- Collection: per-story + download all -->
     <div id="results-collection" hidden>
       <div class="story-list" id="story-results-list"></div>
       <div style="margin-top:14px">
         <button class="btn-primary" id="download-all-btn" style="width:100%">⬇️ Download All as collection.zip</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stage 3: Viewer / Editor -->
+  <div class="card" id="card-viewer" hidden>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h2 style="margin:0">📖 Review &amp; Edit</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="v-saved" id="v-saved">✓ Saved</span>
+        <button class="btn-primary" id="viewer-download-btn" style="padding:7px 14px;font-size:13px">⬇️ Download edited ZIP</button>
+        <button class="btn-secondary" id="viewer-close-btn" style="padding:7px 14px;font-size:13px">✕ Close</button>
+      </div>
+    </div>
+    <!-- Level tabs -->
+    <div class="viewer-tabs" id="viewer-level-tabs"></div>
+    <!-- Language tabs -->
+    <div class="viewer-tabs v-tab-langs" id="viewer-lang-tabs"></div>
+    <!-- Content -->
+    <div class="viewer-body">
+      <div class="viewer-chaplist" id="viewer-chaplist"></div>
+      <div class="viewer-right">
+        <div class="v-ch-title" id="viewer-ch-title"></div>
+        <textarea class="v-ch-text" id="viewer-ch-text" spellcheck="false"></textarea>
       </div>
     </div>
   </div>
@@ -739,11 +823,36 @@
 
     <hr class="divider">
 
+    <hr class="divider" style="margin:16px 0">
+
+    <h2 style="margin-bottom:10px">AI Models</h2>
+    <p class="sub" style="margin-bottom:14px">Select quality vs cost tradeoff for each operation</p>
+    <div class="model-row">
+      <label for="adapt-model-sel">Adaptation</label>
+      <select class="model-select" id="adapt-model-sel">
+        <option value="gpt-4o-mini">gpt-4o-mini — fast, cheap (~$0.18/book)</option>
+        <option value="gpt-4o" selected>gpt-4o — best quality (~$3/book)</option>
+        <option value="gpt-4.1-mini">gpt-4.1-mini — fast, good</option>
+        <option value="gpt-4.1">gpt-4.1 — top quality</option>
+      </select>
+    </div>
+    <div class="model-row">
+      <label for="translate-model-sel">Translation</label>
+      <select class="model-select" id="translate-model-sel">
+        <option value="gpt-4o-mini" selected>gpt-4o-mini — recommended (~$1/book)</option>
+        <option value="gpt-4o">gpt-4o — literary quality (~$16/book)</option>
+        <option value="gpt-4.1-mini">gpt-4.1-mini — fast, good</option>
+        <option value="gpt-4.1">gpt-4.1 — top quality</option>
+      </select>
+    </div>
+
+    <hr class="divider" style="margin:16px 0">
+
     <h2 style="margin-bottom:10px">API Keys</h2>
     <div id="keys-list">Loading…</div>
 
     <div class="admin-actions">
-      <button class="btn-primary" id="admin-save-btn">Save Provider</button>
+      <button class="btn-primary" id="admin-save-btn">Save Settings</button>
       <button class="btn-secondary" id="admin-close-btn">Close</button>
     </div>
   </div>
@@ -1159,6 +1268,14 @@ async function handleFile(file) {
       ? `✅ Metadata from EPUB: "${book.title}" — ${book.author || 'Unknown'}`
       : '⚠️ No metadata — fill in title and author manually';
 
+    // EPUB collection banner: suggest collection mode when ≥5 chapters
+    const collBanner = document.getElementById('epub-collection-banner');
+    if (ext === 'epub' && book.chapters.length >= 5) {
+      collBanner.hidden = false;
+    } else {
+      collBanner.hidden = true;
+    }
+
     // Show base UI (languages, options needed before structure detection cost calc)
     show('card-langs'); show('card-options');
 
@@ -1247,6 +1364,8 @@ async function runPipeline(book, settings) {
     show('results-single');
     show('card-results');
     document.getElementById('card-results').scrollIntoView({ behavior:'smooth' });
+    // Auto-open viewer
+    renderViewer(results);
   } catch (err) {
     document.querySelectorAll('.ps-icon').forEach(el => {
       if (el.textContent === '⏳') el.textContent = '❌';
@@ -1578,6 +1697,164 @@ function normalizeBlocks(text, minLen = 80) {
   return out.join('\n\n');
 }
 
+// ─── STAGE 3: VIEWER / EDITOR ──────────────────────────────────────────────
+
+let viewerData   = null;  // { levels: {lvl:{lang:[{title,content}]}}, meta }
+let vLevel       = 'original';
+let vLang        = 'en';
+let vChap        = 0;
+
+function parseChapters(text) {
+  const rx     = /\[\[CHAPTER:([^\]]*)\]\]/g;
+  const titles = [...text.matchAll(rx)].map(m => m[1].trim());
+  const parts  = text.split(/\[\[CHAPTER:[^\]]*\]\]/);
+  const chapters = [];
+  for (let i = 0; i < titles.length; i++) {
+    chapters.push({ title: titles[i], content: (parts[i + 1] || '').trim() });
+  }
+  // Fallback: whole text as one chapter
+  return chapters.length ? chapters : [{ title: '', content: text.trim() }];
+}
+
+function rebuildText(chapters) {
+  return chapters.map(c => `[[CHAPTER:${c.title}]]\n\n${c.content}`).join('\n\n\n');
+}
+
+function renderViewer(results) {
+  const lvlKeys  = Object.keys(results.levels);
+  const langKeys = Object.keys(results.levels[lvlKeys[0]]);
+
+  viewerData = { levels: {}, meta: results.meta };
+  for (const lvl of lvlKeys) {
+    viewerData.levels[lvl] = {};
+    for (const lang of langKeys) {
+      viewerData.levels[lvl][lang] = parseChapters(results.levels[lvl][lang]);
+    }
+  }
+
+  vLevel = 'original';
+  vLang  = langKeys[0];
+  vChap  = 0;
+
+  const LEVEL_LABELS = { original:'Original', b2:'B2', b1:'B1', a2:'A2', a1:'A1' };
+  const LANG_FLAGS   = { en:'🇬🇧', uk:'🇺🇦', ru:'🇷🇺', pl:'🇵🇱', de:'🇩🇪', es:'🇪🇸', fr:'🇫🇷', it:'🇮🇹', pt:'🇵🇹', cz:'🇨🇿' };
+
+  document.getElementById('viewer-level-tabs').innerHTML = lvlKeys.map(l =>
+    `<button class="v-tab${l===vLevel?' active':''}" onclick="switchVLevel('${l}')">${LEVEL_LABELS[l]||l.toUpperCase()}</button>`
+  ).join('');
+
+  document.getElementById('viewer-lang-tabs').innerHTML = langKeys.map(l =>
+    `<button class="v-tab${l===vLang?' active':''}" onclick="switchVLang('${l}')">${(LANG_FLAGS[l]||'')+' '+l.toUpperCase()}</button>`
+  ).join('');
+
+  refreshChapList();
+  showVChap(0);
+  show('card-viewer');
+  document.getElementById('card-viewer').scrollIntoView({ behavior: 'smooth' });
+}
+
+function refreshChapList() {
+  const chapters = viewerData.levels[vLevel][vLang];
+  document.getElementById('viewer-chaplist').innerHTML = chapters.map((c, i) => `
+    <div class="v-chap-item${i===vChap?' active':''}" onclick="showVChap(${i})">
+      <div class="v-chap-num">Ch. ${i+1}</div>
+      <div class="v-chap-lbl">${c.title || '(untitled)'}</div>
+    </div>`).join('');
+}
+
+function saveCurrentVChap() {
+  const el = document.getElementById('viewer-ch-text');
+  if (!el || !viewerData) return;
+  const chaps = viewerData.levels[vLevel][vLang];
+  if (chaps[vChap]) chaps[vChap].content = el.value;
+}
+
+function showVChap(idx) {
+  saveCurrentVChap();
+  vChap = idx;
+  const chap = viewerData.levels[vLevel][vLang][idx];
+  if (!chap) return;
+  document.getElementById('viewer-ch-title').textContent = chap.title || '(untitled)';
+  document.getElementById('viewer-ch-text').value = chap.content;
+  document.querySelectorAll('.v-chap-item').forEach((el, i) => el.classList.toggle('active', i === idx));
+}
+
+function switchVLevel(lvl) {
+  saveCurrentVChap();
+  vLevel = lvl;
+  document.querySelectorAll('#viewer-level-tabs .v-tab').forEach(el =>
+    el.classList.toggle('active', el.textContent.toLowerCase() === lvl || el.textContent.toUpperCase() === lvl.toUpperCase() || el.onclick.toString().includes(`'${lvl}'`)));
+  // Re-render tabs
+  document.querySelectorAll('#viewer-level-tabs .v-tab').forEach(el => {
+    const match = el.getAttribute('onclick')?.includes(`'${lvl}'`);
+    el.classList.toggle('active', !!match);
+  });
+  refreshChapList();
+  showVChap(Math.min(vChap, viewerData.levels[vLevel][vLang].length - 1));
+}
+
+function switchVLang(lang) {
+  saveCurrentVChap();
+  vLang = lang;
+  document.querySelectorAll('#viewer-lang-tabs .v-tab').forEach(el =>
+    el.classList.toggle('active', !!el.getAttribute('onclick')?.includes(`'${lang}'`)));
+  refreshChapList();
+  showVChap(Math.min(vChap, viewerData.levels[vLevel][vLang].length - 1));
+}
+
+async function downloadViewerZIP() {
+  saveCurrentVChap();
+  // Build a modified results object with edited content
+  const edited = JSON.parse(JSON.stringify(window.bookResults));
+  for (const [lvl, langs] of Object.entries(viewerData.levels)) {
+    for (const [lang, chapters] of Object.entries(langs)) {
+      edited.levels[lvl][lang] = rebuildText(chapters);
+    }
+  }
+  const btn = document.getElementById('viewer-download-btn');
+  btn.disabled = true; btn.textContent = '⏳ Building ZIP…';
+  try {
+    const blob = await buildZIPBlob(edited);
+    triggerDownload(blob, `${edited.meta.slug}-edited.zip`);
+    const sv = document.getElementById('v-saved');
+    sv.style.display = 'inline'; setTimeout(() => { sv.style.display = 'none'; }, 3000);
+  } catch (err) { toast(`❌ ${err.message}`); }
+  btn.disabled = false; btn.textContent = '⬇️ Download edited ZIP';
+}
+
+// ─── COVER GENERATION ──────────────────────────────────────────────────────
+
+let generatedCoverBlob = null;
+
+async function generateCoverImage() {
+  const title  = document.getElementById('book-title').value.trim();
+  const author = document.getElementById('book-author').value.trim();
+  if (!title) { toast('⚠️ Enter book title first'); return; }
+
+  const btn = document.getElementById('gen-cover-btn');
+  btn.disabled = true; btn.textContent = '⏳ Generating…';
+  document.getElementById('cover-status').textContent = 'Generating cover…';
+  document.getElementById('cover-preview').style.display = 'flex';
+  document.getElementById('cover-preview').style.alignItems = 'center';
+
+  try {
+    const data = await apiPost('/api/generate-cover', { title, author });
+    if (!data.imageBase64) throw new Error(data.error || 'No image returned');
+
+    const byteArr = Uint8Array.from(atob(data.imageBase64), c => c.charCodeAt(0));
+    generatedCoverBlob = new Blob([byteArr], { type: 'image/jpeg' });
+    const url = URL.createObjectURL(generatedCoverBlob);
+    document.getElementById('cover-img-preview').src = url;
+    document.getElementById('cover-status').textContent = '✅ Ready to use';
+    toast('✅ Cover generated!');
+  } catch (err) {
+    document.getElementById('cover-status').textContent = `❌ ${err.message}`;
+    toast(`❌ Cover generation failed: ${err.message}`);
+  }
+
+  btn.disabled = false; btn.textContent = '✨ Generate';
+}
+
 // ─── ZIP GENERATOR ─────────────────────────────────────────────────────────
 
 function triggerDownload(blob, filename) {
@@ -1604,9 +1881,11 @@ async function buildZIPBlob(r) {
   };
   root.file('book.json', JSON.stringify(bookJson, null, 2));
 
-  // cover
-  if (r.cover) {
-    const buf = await r.cover.arrayBuffer();
+  // cover — uploaded file takes priority, then generated cover
+  const coverFile = document.getElementById('cover-input').files[0];
+  const coverSrc  = coverFile || generatedCoverBlob || r.cover;
+  if (coverSrc) {
+    const buf = await coverSrc.arrayBuffer();
     root.file('cover.jpg', buf);
   }
 
@@ -1779,6 +2058,10 @@ async function loadAdminConfig() {
       radio.closest('.provider-opt').classList.add('selected');
     }
 
+    // Set model selects
+    if (cfg.adaptModel)    document.getElementById('adapt-model-sel').value    = cfg.adaptModel;
+    if (cfg.translateModel) document.getElementById('translate-model-sel').value = cfg.translateModel;
+
     // OpenAI badge
     const ok = cfg.keys.openai;
     const b  = document.getElementById('badge-openai');
@@ -1812,15 +2095,22 @@ async function loadAdminConfig() {
 
 async function saveProvider() {
   const radio = document.querySelector('input[name="provider"]:checked');
-  if (!radio) return;
-  const btn = document.getElementById('admin-save-btn');
+  const btn   = document.getElementById('admin-save-btn');
   btn.disabled = true; btn.textContent = 'Saving…';
   try {
-    const data = await apiPost('/api/provider', { provider: radio.value });
-    if (data.ok) toast(`✅ Provider set to "${data.provider}"`);
-    else         toast(`❌ ${data.error}`);
+    // Save provider
+    if (radio) {
+      const d = await apiPost('/api/provider', { provider: radio.value });
+      if (!d.ok) throw new Error(d.error);
+    }
+    // Save models
+    const adaptModel     = document.getElementById('adapt-model-sel').value;
+    const translateModel = document.getElementById('translate-model-sel').value;
+    const d2 = await apiPost('/api/models', { adaptModel, translateModel });
+    if (!d2.ok) throw new Error(d2.error);
+    toast('✅ Settings saved');
   } catch (err) { toast(`❌ ${err.message}`); }
-  btn.disabled = false; btn.textContent = 'Save Provider';
+  btn.disabled = false; btn.textContent = 'Save Settings';
 }
 
 // ─── API ───────────────────────────────────────────────────────────────────
@@ -1889,10 +2179,12 @@ fileInput.addEventListener('change', ()=>{ if (fileInput.files[0]) handleFile(fi
 document.getElementById('fp-remove').addEventListener('click', ()=>{
   parsedBook = null; fileInput.value = '';
   collectionMode = false; collectionStories = []; collectionResults = [];
+  generatedCoverBlob = null;
   document.getElementById('file-pill').hidden = true;
+  document.getElementById('epub-collection-banner').hidden = true;
   resetDropZone();
   ['card-collection','card-info','card-langs','card-options','cost-estimate',
-   'run-btn','card-progress','card-results'].forEach(hide);
+   'run-btn','card-progress','card-results','card-viewer'].forEach(hide);
 });
 
 // Languages
@@ -1956,7 +2248,40 @@ document.getElementById('toggle-all-stories').addEventListener('click', () => {
 document.getElementById('download-zip-btn').addEventListener('click', downloadZIP);
 document.getElementById('download-all-btn').addEventListener('click', downloadAllCollectionZIP);
 document.getElementById('review-btn').addEventListener('click', () => {
-  toast('Review & Edit coming in Session 4');
+  if (window.bookResults) renderViewer(window.bookResults);
+});
+
+// Viewer
+document.getElementById('viewer-download-btn').addEventListener('click', downloadViewerZIP);
+document.getElementById('viewer-close-btn').addEventListener('click', () => hide('card-viewer'));
+
+// Cover generation
+document.getElementById('gen-cover-btn').addEventListener('click', generateCoverImage);
+
+// EPUB collection mode
+document.getElementById('epub-use-collection-btn').addEventListener('click', () => {
+  if (!parsedBook) return;
+  collectionMode = true;
+  // Convert EPUB chapters into collectionStories format
+  const stories = parsedBook.chapters
+    .filter(c => c.content.trim().length >= 80)
+    .map(c => ({
+      title:     c.title || 'Untitled',
+      content:   c.content,
+      wordCount: c.content.split(/\s+/).filter(Boolean).length,
+    }));
+  if (!stories.length) { toast('⚠️ No valid chapters found'); return; }
+
+  document.getElementById('epub-collection-banner').hidden = true;
+  // Update pill meta
+  document.getElementById('fp-meta').textContent =
+    `${document.getElementById('fp-meta').textContent.split('·')[0].trim()} · Collection · ${stories.length} stories · ${stories.reduce((s,x)=>s+x.wordCount,0).toLocaleString()} words`;
+
+  const langCount = [...document.querySelectorAll('input[name="lang"]:checked')].length;
+  const imgStyle  = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
+  renderCollectionCard(stories, langCount, imgStyle !== 'none');
+  show('card-info');
+  updateCostEstimate();
 });
 
 // Admin
