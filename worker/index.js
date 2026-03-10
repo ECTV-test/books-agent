@@ -1,6 +1,10 @@
 // Book Agent — Cloudflare Worker
 // Routes: /api/auth, /api/config, /api/provider, /api/admin/auth,
-//         /api/structure, /api/detect-level, /api/adapt, /api/translate, /api/describe
+//         /api/structure, /api/detect-level, /api/adapt, /api/translate, /api/describe,
+//         /api/models (POST), /api/generate-cover (POST)
+
+const ADAPT_MODELS     = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'];
+const TRANSLATE_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'];
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -60,13 +64,16 @@ export default {
       const authErr = checkEditorAuth(request, env);
       if (authErr) return authErr;
 
-      if (pathname === '/api/config'        && request.method === 'GET')  return getConfig(env);
-      if (pathname === '/api/provider'      && request.method === 'POST') return setProvider(request, env);
-      if (pathname === '/api/structure'     && request.method === 'POST') return detectStructure(request, env);
-      if (pathname === '/api/detect-level'  && request.method === 'POST') return detectLevel(request, env);
-      if (pathname === '/api/adapt'         && request.method === 'POST') return adapt(request, env);
-      if (pathname === '/api/translate'     && request.method === 'POST') return translate(request, env);
-      if (pathname === '/api/describe'      && request.method === 'POST') return describe(request, env);
+      if (pathname === '/api/config'          && request.method === 'GET')  return getConfig(env);
+      if (pathname === '/api/provider'        && request.method === 'POST') return setProvider(request, env);
+      if (pathname === '/api/models'          && request.method === 'POST') return setModels(request, env);
+      if (pathname === '/api/structure'       && request.method === 'POST') return detectStructure(request, env);
+      if (pathname === '/api/detect-level'    && request.method === 'POST') return detectLevel(request, env);
+      if (pathname === '/api/adapt'           && request.method === 'POST') return adapt(request, env);
+      if (pathname === '/api/translate'       && request.method === 'POST') return translate(request, env);
+      if (pathname === '/api/describe'        && request.method === 'POST') return describe(request, env);
+      if (pathname === '/api/generate-cover'         && request.method === 'POST') return generateCover(request, env);
+      if (pathname === '/api/generate-chapter-image' && request.method === 'POST') return generateChapterImage(request, env);
 
       return json({ error: 'Not found' }, 404);
     } catch (err) {
@@ -79,15 +86,28 @@ export default {
 // ─── Config ─────────────────────────────────────────────────────────────────
 
 async function getConfig(env) {
-  const provider = await env.KV.get('active_provider') || 'openai';
+  const provider      = await env.KV.get('active_provider')   || 'openai';
+  const adaptModel    = await env.KV.get('adapt_model')        || 'gpt-4o';
+  const translateModel = await env.KV.get('translate_model')   || 'gpt-4o-mini';
   return json({
     provider,
+    adaptModel,
+    translateModel,
     keys: {
       openai: !!env.OPENAI_API_KEY,
       google: !!env.GOOGLE_API_KEY,
       claude: !!env.ANTHROPIC_API_KEY,
     },
   });
+}
+
+async function setModels(request, env) {
+  const { adaptModel, translateModel } = await request.json();
+  if (adaptModel    && !ADAPT_MODELS.includes(adaptModel))     return json({ error: 'Invalid adapt model' }, 400);
+  if (translateModel && !TRANSLATE_MODELS.includes(translateModel)) return json({ error: 'Invalid translate model' }, 400);
+  if (adaptModel)     await env.KV.put('adapt_model',     adaptModel);
+  if (translateModel) await env.KV.put('translate_model', translateModel);
+  return json({ ok: true, adaptModel, translateModel });
 }
 
 // ─── Editor auth ─────────────────────────────────────────────────────────────
@@ -203,9 +223,10 @@ async function detectLevel(request, env) {
 
 async function adapt(request, env) {
   const { text, fromLevel, toLevel } = await request.json();
+  const model = await env.KV.get('adapt_model') || 'gpt-4o';
 
   const result = await openai(env.OPENAI_API_KEY, {
-    model: 'gpt-4o',
+    model,
     messages: [
       {
         role: 'system',
@@ -277,9 +298,10 @@ const TRANSLATE_LEVEL_INSTRUCTIONS = {
 async function translateOpenAI(text, targetLang, level, env) {
   const langName = LANG_NAMES[targetLang] || targetLang;
   const levelInstructions = (TRANSLATE_LEVEL_INSTRUCTIONS[level] || TRANSLATE_LEVEL_INSTRUCTIONS.original)(langName);
+  const model = await env.KV.get('translate_model') || 'gpt-4o-mini';
 
   const result = await openai(env.OPENAI_API_KEY, {
-    model: 'gpt-4o-mini',
+    model,
     messages: [
       {
         role: 'system',
@@ -333,6 +355,91 @@ Output ONLY the description text, no labels or notes.`,
   });
 
   return json({ description: result.choices[0].message.content.trim() });
+}
+
+// ─── Generate Cover ──────────────────────────────────────────────────────────
+
+async function generateCover(request, env) {
+  const { title, author, description } = await request.json();
+  const prompt = `Book cover art for "${title}" by ${author}. ${description ? description + '.' : ''} Atmospheric, professional illustration. No text, no letters, no words anywhere in the image.`;
+
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-image-1',
+      prompt,
+      n: 1,
+      size: '1024x1024',
+      output_format: 'jpeg',
+      quality: 'medium',
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) return json({ error: data.error?.message || 'Image generation failed' }, 500);
+  return json({ imageBase64: data.data[0].b64_json });
+}
+
+// ─── Generate Chapter Image ──────────────────────────────────────────────────
+
+async function generateChapterImage(request, env) {
+  const { chapterText, imageStyle, title } = await request.json();
+
+  const styleDesc = {
+    watercolor: 'soft watercolor illustration, pastel colors, artistic brushwork, impressionistic',
+    minimal:    'minimalist illustration, clean geometric shapes, limited color palette, flat design',
+    comic:      'comic book style, bold ink outlines, vivid saturated colors, dynamic composition',
+  }[imageStyle] || 'atmospheric artistic illustration';
+
+  // Step 1: GPT-4o-mini writes a focused visual scene prompt
+  const promptResult = await openai(env.OPENAI_API_KEY, {
+    model: 'gpt-4o-mini',
+    messages: [
+      {
+        role: 'system',
+        content: `You write concise image generation prompts for book chapter illustrations.
+Based on the chapter excerpt, write a single visual scene description (50–70 words).
+Focus on: setting, atmosphere, mood, lighting, key objects and environment.
+Do NOT mention faces, characters' appearances, text, or words.
+Style to convey: ${styleDesc}.
+Output ONLY the image prompt, no labels or explanations.`,
+      },
+      {
+        role: 'user',
+        content: `Book: "${title}"\n\nChapter excerpt:\n${chapterText}`,
+      },
+    ],
+    max_tokens: 120,
+    temperature: 0.7,
+  });
+
+  const imagePrompt = promptResult.choices[0].message.content.trim()
+    + `. ${styleDesc}. No text, no letters, no faces.`;
+
+  // Step 2: GPT Image 1 generates the illustration
+  const imgResponse = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-image-1',
+      prompt: imagePrompt,
+      n: 1,
+      size: '1024x1024',
+      output_format: 'jpeg',
+      quality: 'medium',
+    }),
+  });
+
+  const data = await imgResponse.json();
+  if (!imgResponse.ok) return json({ error: data.error?.message || 'Image generation failed' }, 500);
+  return json({ imageBase64: data.data[0].b64_json });
 }
 
 // ─── OpenAI helper ───────────────────────────────────────────────────────────

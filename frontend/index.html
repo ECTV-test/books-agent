@@ -1348,6 +1348,7 @@ const PIPELINE_STEPS = [
   { id:'adapt-a1',  label:'Adapting → A1' },
   { id:'translate', label:'Translating' },
   { id:'metadata',  label:'Generating descriptions' },
+  { id:'images',    label:'Generating chapter images' },
   { id:'pack',      label:'Packaging result' },
 ];
 
@@ -1483,6 +1484,39 @@ async function runSingleStory(book, settings) {
 
   setStep('metadata','done', `${descLangs.length} languages`);
 
+  // ── 7.5. Chapter images ─────────────────────────────────────────────────
+  const chapterImages = [];
+  if (settings.imageStyle !== 'none') {
+    setStep('images','running', `0 / ${n} images`);
+    let imgDone = 0;
+    const imgs = new Array(n).fill(null);
+
+    await runBatch(book.chapters.map((_, i) => i), async (i) => {
+      // Strip [[CHAPTER:...]] marker, take first ~600 words
+      const raw = chapterTexts.original[i].replace(/^\[\[CHAPTER:[^\]]*\]\]\s*/i, '');
+      const excerpt = raw.split(/\s+/).slice(0, 600).join(' ');
+      try {
+        const data = await apiPost('/api/generate-chapter-image', {
+          chapterText: excerpt,
+          imageStyle:  settings.imageStyle,
+          title:       book.title,
+        });
+        imgs[i] = data.imageBase64 || null;
+      } catch (e) {
+        console.warn(`Chapter ${i + 1} image failed:`, e.message);
+        // don't fail the whole pipeline
+      }
+      imgDone++;
+      setStep('images','running', `${imgDone} / ${n} images`);
+    }, 2);
+
+    chapterImages.push(...imgs);
+    const generated = imgs.filter(Boolean).length;
+    setStep('images','done', `${generated} / ${n} images`);
+  } else {
+    setStep('images','done', 'Skipped');
+  }
+
   // ── 8. Pack ────────────────────────────────────────────────────────────
   setStep('pack','running');
 
@@ -1508,6 +1542,7 @@ async function runSingleStory(book, settings) {
     },
     levels,
     descriptions,
+    chapterImages,
     cover: document.getElementById('cover-input').files[0] || null,
   };
 
@@ -1904,6 +1939,16 @@ async function buildZIPBlob(r) {
       const stored = lvlKey === 'original' ? text : normalizeBlocks(text);
       lvlFolder.file(`book.${lang}.txt`, stored);
     }
+  }
+
+  // Chapter images → levels/original/chapter_1.jpg, chapter_2.jpg, ...
+  if (r.chapterImages && r.chapterImages.length) {
+    const origFolder = levelsFolder.folder('original');
+    r.chapterImages.forEach((b64, i) => {
+      if (!b64) return;
+      const byteArr = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      origFolder.file(`chapter_${i + 1}.jpg`, byteArr);
+    });
   }
 
   return zip.generateAsync({
