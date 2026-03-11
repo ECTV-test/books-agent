@@ -769,6 +769,8 @@
     </div>
   </div>
 
+  <!-- Hidden file input: per-story cover upload in collection mode -->
+  <input type="file" id="story-cover-file-input" accept="image/*" style="display:none">
 </main>
 
 <!-- ═══ LOGIN OVERLAY ═══ -->
@@ -1666,6 +1668,8 @@ function renderCollectionResults() {
             onclick="downloadStoryZIP(${i})">⬇️ Download</button>
           <button class="btn-secondary" style="padding:6px 10px;font-size:12px;white-space:nowrap"
             id="cover-btn-${i}" onclick="generateStoryCover(${i})">🖼️ Cover <span style="color:#86868b;font-size:11px">~$0.04</span></button>
+          <button class="btn-secondary" style="padding:6px 10px;font-size:12px;white-space:nowrap"
+            id="upload-btn-${i}" onclick="uploadStoryCover(${i})">📎 Upload</button>
         </div>
       </div>`;
   }).join('');
@@ -1703,6 +1707,46 @@ async function generateStoryCover(idx) {
     toast(`❌ Cover failed: ${err.message}`);
   }
 }
+
+// ── Per-story cover upload ──────────────────────────────────────────────────
+
+let _storyCoverUploadIdx = -1;
+
+function uploadStoryCover(idx) {
+  _storyCoverUploadIdx = idx;
+  const inp = document.getElementById('story-cover-file-input');
+  inp.value = '';
+  inp.click();
+}
+
+document.getElementById('story-cover-file-input').addEventListener('change', async function() {
+  const file = this.files[0];
+  if (!file || _storyCoverUploadIdx < 0) return;
+
+  const idx = _storyCoverUploadIdx;
+  _storyCoverUploadIdx = -1;
+  const r = collectionResults[idx];
+  if (!r || !r.results) return;
+
+  const btn = document.getElementById(`upload-btn-${idx}`);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+
+  try {
+    const title  = r.title;
+    const author = document.getElementById('book-author').value.trim();
+    const coverBlob = await addTextToImageFile(file, title, author);
+    collectionResults[idx].coverBlob = coverBlob;
+    const newZip = await buildZIPBlob(r.results, coverBlob);
+    collectionResults[idx].zip = newZip;
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Uploaded'; }
+    toast(`✅ Cover for "${title}" uploaded — re-download to get it`);
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '📎 Upload'; }
+    toast(`❌ ${err.message}`);
+  }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 
 function reviewCollectionStory(idx) {
   const r = collectionResults[idx];
@@ -2006,64 +2050,77 @@ function wrapTextCover(ctx, text, maxWidth, font) {
   return lines;
 }
 
-// Draw title + author text over generated cover image using Canvas
+// Shared: draw title + author text overlay onto an already-prepared canvas context
+function drawCoverText(ctx, title, author) {
+  const grad = ctx.createLinearGradient(0, 0, 0, 420);
+  grad.addColorStop(0, 'rgba(0,0,0,0.78)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 1024, 420);
+
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle    = 'white';
+  ctx.shadowColor  = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur   = 14;
+  ctx.shadowOffsetY = 2;
+
+  let titleFont = 'bold 72px Georgia, "Times New Roman", serif';
+  let titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
+  if (titleLines.length > 3) {
+    titleFont  = 'bold 54px Georgia, "Times New Roman", serif';
+    titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
+  }
+  const titleSize  = parseInt(titleFont);
+  const lineHeight = titleSize * 1.18;
+
+  let y = 36;
+  ctx.font = titleFont;
+  for (const line of titleLines) { ctx.fillText(line, 512, y); y += lineHeight; }
+
+  if (author) {
+    const authorSize = Math.round(titleSize * 0.65);
+    ctx.font         = `italic ${authorSize}px Georgia, "Times New Roman", serif`;
+    ctx.shadowBlur   = 10;
+    ctx.strokeStyle  = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth    = 2;
+    ctx.strokeText(`by ${author}`, 512, y + 14);
+    ctx.fillText(`by ${author}`, 512, y + 14);
+  }
+}
+
+// Draw title + author text over a GPT-generated cover (base64 JPEG)
 function addTextToCover(base64, title, author) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width  = 1024;
-      canvas.height = 1536;
+      canvas.width = 1024; canvas.height = 1536;
       const ctx = canvas.getContext('2d');
-
-      // Draw base image (portrait 2:3)
       ctx.drawImage(img, 0, 0, 1024, 1536);
-
-      // Dark gradient at top for text readability
-      const grad = ctx.createLinearGradient(0, 0, 0, 420);
-      grad.addColorStop(0, 'rgba(0,0,0,0.78)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 1024, 420);
-
-      ctx.textAlign    = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle    = 'white';
-      ctx.shadowColor  = 'rgba(0,0,0,0.85)';
-      ctx.shadowBlur   = 14;
-      ctx.shadowOffsetY = 2;
-
-      // Title — auto font size: try 72, shrink if > 3 lines
-      let titleFont = 'bold 72px Georgia, "Times New Roman", serif';
-      let titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
-      if (titleLines.length > 3) {
-        titleFont  = 'bold 54px Georgia, "Times New Roman", serif';
-        titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
-      }
-      const titleSize  = parseInt(titleFont);
-      const lineHeight = titleSize * 1.18;
-
-      let y = 36;
-      ctx.font = titleFont;
-      for (const line of titleLines) {
-        ctx.fillText(line, 512, y);
-        y += lineHeight;
-      }
-
-      // Author — larger font, stroke for extra readability
-      if (author) {
-        const authorSize = Math.round(titleSize * 0.65);
-        ctx.font         = `italic ${authorSize}px Georgia, "Times New Roman", serif`;
-        ctx.shadowBlur   = 10;
-        ctx.strokeStyle  = 'rgba(0,0,0,0.5)';
-        ctx.lineWidth    = 2;
-        ctx.strokeText(`by ${author}`, 512, y + 14);
-        ctx.fillText(`by ${author}`, 512, y + 14);
-      }
-
+      drawCoverText(ctx, title, author);
       canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.93);
     };
     img.src = 'data:image/jpeg;base64,' + base64;
+  });
+}
+
+// Draw title + author text over an uploaded image File
+function addTextToImageFile(file, title, author) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024; canvas.height = 1536;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 1024, 1536);
+      drawCoverText(ctx, title, author);
+      canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.93);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+    img.src = url;
   });
 }
 
