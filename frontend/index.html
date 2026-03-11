@@ -906,11 +906,26 @@ function updateCostEstimate() {
   const el = document.getElementById('cost-estimate');
   if (!el || !parsedBook) return;
 
-  const langCount    = [...document.querySelectorAll('input[name="lang"]:checked')].length;
-  const imageStyle   = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
+  const langCount     = [...document.querySelectorAll('input[name="lang"]:checked')].length;
+  const imageStyle    = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
   const includeImages = imageStyle !== 'none';
-  const words        = parsedBook.wordCount || 0;
-  const chapters     = parsedBook.chapters.length;
+
+  // In collection mode use only the selected stories, not the full book
+  let words, chapters, label;
+  if (collectionMode && collectionStories.length) {
+    const selected = getSelectedStories();
+    if (selected.length) {
+      words    = selected.reduce((s, x) => s + x.wordCount, 0);
+      chapters = selected.length;
+      label    = `${selected.length} of ${collectionStories.length} stories`;
+    } else {
+      words = 0; chapters = 0; label = 'No stories selected';
+    }
+  } else {
+    words    = parsedBook.wordCount || 0;
+    chapters = parsedBook.chapters.length;
+    label    = `${words.toLocaleString()} words · ${chapters} chapters`;
+  }
 
   const c = estimateCost(words, chapters, langCount, includeImages);
 
@@ -920,7 +935,7 @@ function updateCostEstimate() {
     </div>
     <div class="ce-total">~$${c.total.toFixed(2)}</div>
     <div class="ce-breakdown">
-      <span class="ce-item">📖 <b>${words.toLocaleString()}</b> words · ${chapters} chapters</span>
+      <span class="ce-item">📖 <b>${label}</b></span>
       <span class="ce-item">⚡ Adapt <b>$${c.adapt.toFixed(2)}</b></span>
       <span class="ce-item">🌍 Translate ×${langCount} <b>$${c.translate.toFixed(2)}</b></span>
       ${includeImages ? `<span class="ce-item">🎨 Images ×${chapters} <b>$${c.images.toFixed(2)}</b></span>` : ''}
@@ -1065,12 +1080,14 @@ function renderCollectionCard(stories, langCount, includeImages) {
       cb.checked = !cb.checked;
       item.classList.toggle('selected', cb.checked);
       updateCollectionTotal();
+      updateCostEstimate();
     });
   });
   list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
     cb.addEventListener('change', () => {
       cb.closest('.story-item').classList.toggle('selected', cb.checked);
       updateCollectionTotal();
+      updateCostEstimate();
     });
   });
 
@@ -1244,6 +1261,7 @@ async function parseTXT(file) {
 async function handleFile(file) {
   const dz = document.getElementById('drop-zone');
   dz.innerHTML = '<div class="dz-icon">⏳</div><div class="dz-label">Parsing…</div>';
+  resetCoverPreview(); // clear cover from any previous book
 
   try {
     const ext  = file.name.split('.').pop().toLowerCase();
@@ -1577,7 +1595,7 @@ async function runCollectionPipeline(stories, author, settings) {
 
     try {
       const { results, zipBlob } = await runSingleStory(storyBook, settings);
-      collectionResults.push({ title: story.title, slug: results.meta.slug, zip: zipBlob });
+      collectionResults.push({ title: story.title, slug: results.meta.slug, zip: zipBlob, results });
     } catch (err) {
       document.querySelectorAll('.ps-icon').forEach(el => {
         if (el.textContent === '⏳') el.textContent = '❌';
@@ -1609,10 +1627,21 @@ function renderCollectionResults() {
     return `
       <div class="story-result">
         <span class="sr-title">${r.title}</span>
-        <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
-          onclick="downloadStoryZIP(${i})">⬇️ Download</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
+            onclick="reviewCollectionStory(${i})">🔍 Review</button>
+          <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
+            onclick="downloadStoryZIP(${i})">⬇️ Download</button>
+        </div>
       </div>`;
   }).join('');
+}
+
+function reviewCollectionStory(idx) {
+  const r = collectionResults[idx];
+  if (!r || !r.results) return;
+  window.bookResults = r.results;
+  renderViewer(r.results);
 }
 
 function downloadStoryZIP(idx) {
@@ -1783,7 +1812,7 @@ function renderViewer(results) {
   ).join('');
 
   refreshChapList();
-  showVChap(0);
+  showVChap(0, true); // skipSave=true: don't overwrite freshly parsed content
   show('card-viewer');
   document.getElementById('card-viewer').scrollIntoView({ behavior: 'smooth' });
 }
@@ -1804,8 +1833,8 @@ function saveCurrentVChap() {
   if (chaps[vChap]) chaps[vChap].content = el.value;
 }
 
-function showVChap(idx) {
-  saveCurrentVChap();
+function showVChap(idx, skipSave = false) {
+  if (!skipSave) saveCurrentVChap();
   vChap = idx;
   const chap = viewerData.levels[vLevel][vLang][idx];
   if (!chap) return;
@@ -1861,6 +1890,82 @@ async function downloadViewerZIP() {
 
 let generatedCoverBlob = null;
 
+// Wrap text to fit within maxWidth, returns array of lines
+function wrapTextCover(ctx, text, maxWidth, font) {
+  ctx.font = font;
+  const words = text.split(' ');
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// Draw title + author text over generated cover image using Canvas
+function addTextToCover(base64, title, author) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width  = 1024;
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d');
+
+      // Draw base image
+      ctx.drawImage(img, 0, 0, 1024, 1024);
+
+      // Dark gradient at top for text readability
+      const grad = ctx.createLinearGradient(0, 0, 0, 340);
+      grad.addColorStop(0, 'rgba(0,0,0,0.72)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 1024, 340);
+
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle    = 'white';
+      ctx.shadowColor  = 'rgba(0,0,0,0.85)';
+      ctx.shadowBlur   = 14;
+      ctx.shadowOffsetY = 2;
+
+      // Title — auto font size: try 72, shrink if > 2 lines
+      let titleFont = 'bold 72px Georgia, "Times New Roman", serif';
+      let titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
+      if (titleLines.length > 3) {
+        titleFont  = 'bold 54px Georgia, "Times New Roman", serif';
+        titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
+      }
+      const titleSize   = parseInt(titleFont);
+      const lineHeight  = titleSize * 1.18;
+
+      let y = 36;
+      ctx.font = titleFont;
+      for (const line of titleLines) {
+        ctx.fillText(line, 512, y);
+        y += lineHeight;
+      }
+
+      // Author
+      if (author) {
+        ctx.font        = `italic ${Math.round(titleSize * 0.54)}px Georgia, "Times New Roman", serif`;
+        ctx.shadowBlur  = 10;
+        ctx.fillText(`by ${author}`, 512, y + 8);
+      }
+
+      canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.93);
+    };
+    img.src = 'data:image/jpeg;base64,' + base64;
+  });
+}
+
 async function generateCoverImage() {
   const title  = document.getElementById('book-title').value.trim();
   const author = document.getElementById('book-author').value.trim();
@@ -1876,8 +1981,8 @@ async function generateCoverImage() {
     const data = await apiPost('/api/generate-cover', { title, author });
     if (!data.imageBase64) throw new Error(data.error || 'No image returned');
 
-    const byteArr = Uint8Array.from(atob(data.imageBase64), c => c.charCodeAt(0));
-    generatedCoverBlob = new Blob([byteArr], { type: 'image/jpeg' });
+    // Add title + author text overlay via Canvas
+    generatedCoverBlob = await addTextToCover(data.imageBase64, title, author);
     const url = URL.createObjectURL(generatedCoverBlob);
     document.getElementById('cover-img-preview').src = url;
     document.getElementById('cover-status').textContent = '✅ Ready to use';
@@ -2189,6 +2294,14 @@ async function apiPost(path, body) {
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
 
+function resetCoverPreview() {
+  generatedCoverBlob = null;
+  document.getElementById('cover-preview').style.display = 'none';
+  document.getElementById('cover-img-preview').src = '';
+  document.getElementById('cover-status').textContent = '';
+  document.getElementById('cover-input').value = '';
+}
+
 function fmtSize(b) {
   if (b < 1024)    return `${b} B`;
   if (b < 1<<20)   return `${(b/1024).toFixed(1)} KB`;
@@ -2227,6 +2340,7 @@ document.getElementById('fp-remove').addEventListener('click', ()=>{
   generatedCoverBlob = null;
   document.getElementById('file-pill').hidden = true;
   document.getElementById('epub-collection-banner').hidden = true;
+  resetCoverPreview();
   resetDropZone();
   ['card-collection','card-info','card-langs','card-options','cost-estimate',
    'run-btn','card-progress','card-results','card-viewer'].forEach(hide);
@@ -2287,6 +2401,7 @@ document.getElementById('toggle-all-stories').addEventListener('click', () => {
   });
   document.getElementById('toggle-all-stories').textContent = all ? 'Select all' : 'Deselect all';
   updateCollectionTotal();
+  updateCostEstimate();
 });
 
 // Results
