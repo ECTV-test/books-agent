@@ -1147,10 +1147,16 @@ function getSelectedStories() {
 }
 
 function updateTitleFromSelection() {
+  if (!collectionMode) return;
   const selected = getSelectedStories();
   if (selected.length === 1) {
+    // Single story: show Step 2 and auto-fill its title
     const titleEl = document.getElementById('book-title');
     if (titleEl) titleEl.value = selected[0].title;
+    show('card-info');
+  } else {
+    // Multiple (or zero) stories: Step 2 is irrelevant — hide it
+    hide('card-info');
   }
 }
 
@@ -1355,7 +1361,7 @@ async function handleFile(file) {
           const imgStyle  = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
           renderCollectionCard(stories, langCount, imgStyle !== 'none');
 
-          show('card-info'); show('cost-estimate'); show('run-btn');
+          updateTitleFromSelection(); show('cost-estimate'); show('run-btn');
           updateCostEstimate();
           return; // collection handling complete
         }
@@ -2603,7 +2609,7 @@ document.getElementById('epub-use-collection-btn').addEventListener('click', () 
   const langCount = [...document.querySelectorAll('input[name="lang"]:checked')].length;
   const imgStyle  = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
   renderCollectionCard(stories, langCount, imgStyle !== 'none');
-  show('card-info');
+  updateTitleFromSelection();
   updateCostEstimate();
 });
 
