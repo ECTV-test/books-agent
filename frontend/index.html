@@ -520,23 +520,25 @@
     #logout-btn.visible { display: inline-block; }
 
     /* ── Viewer (Stage 3) ── */
-    .viewer-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .viewer-tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 6px; }
     .v-tab {
-      padding: 5px 14px; border-radius: 20px; border: 1.5px solid #d2d2d7;
-      background: white; cursor: pointer; font-size: 12px; font-weight: 600;
+      padding: 4px 11px; border-radius: 20px; border: 1.5px solid #d2d2d7;
+      background: white; cursor: pointer; font-size: 11px; font-weight: 600;
       color: #3d3d3d; transition: all 0.15s; white-space: nowrap;
     }
     .v-tab:hover  { border-color: #0071e3; color: #0071e3; }
     .v-tab.active { background: #0071e3; color: white; border-color: #0071e3; }
-    .v-tab-langs  { margin-bottom: 16px; }
-    .viewer-body  {
-      display: grid; grid-template-columns: 200px 1fr; gap: 12px;
-      min-height: 420px;
+    /* Two-pane layout: chaplist | reference | edit */
+    .viewer-body-2pane {
+      display: grid;
+      grid-template-columns: 150px 1fr 1fr;
+      gap: 10px;
+      align-items: start;
     }
-    @media (max-width: 600px) { .viewer-body { grid-template-columns: 1fr; } }
+    @media (max-width: 700px) { .viewer-body-2pane { grid-template-columns: 1fr; } }
     .viewer-chaplist {
       border: 1px solid #e5e7eb; border-radius: 10px; overflow-y: auto;
-      max-height: 500px;
+      max-height: 560px;
     }
     .v-chap-item {
       padding: 9px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0;
@@ -547,10 +549,23 @@
     .v-chap-item.active { background: #e8f0fe; }
     .v-chap-num   { color: #86868b; font-size: 10px; margin-bottom: 2px; }
     .v-chap-lbl   { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .viewer-right { display: flex; flex-direction: column; gap: 8px; }
-    .v-ch-title   { font-size: 13px; font-weight: 700; color: #1d1d1f; }
-    .v-ch-text    {
-      flex: 1; width: 100%; min-height: 380px; padding: 12px 14px;
+    .viewer-pane  { display: flex; flex-direction: column; gap: 4px; }
+    .viewer-pane-hdr {
+      font-size: 10px; font-weight: 700; color: #86868b;
+      text-transform: uppercase; letter-spacing: 1px;
+      padding: 0 2px; margin-bottom: 2px;
+    }
+    /* Read-only reference pane */
+    .v-ch-content {
+      padding: 12px 14px;
+      border: 1.5px solid #e5e7eb; border-radius: 10px;
+      font-size: 13px; line-height: 1.7; font-family: inherit;
+      overflow-y: auto; min-height: 420px; max-height: 560px;
+      background: #fafafa; white-space: pre-wrap; color: #1d1d1f;
+    }
+    /* Editable pane */
+    .v-ch-text {
+      width: 100%; min-height: 420px; padding: 12px 14px;
       border: 1.5px solid #d2d2d7; border-radius: 10px;
       font-size: 13px; line-height: 1.7; font-family: inherit;
       resize: vertical; outline: none; transition: border-color 0.2s;
@@ -641,9 +656,10 @@
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input type="file" id="cover-input" accept="image/*" style="flex:1;min-width:0">
         <button class="btn-secondary" id="gen-cover-btn" type="button" style="white-space:nowrap;padding:8px 14px;font-size:13px">✨ Generate</button>
+        <span style="font-size:11px;color:#86868b;white-space:nowrap">~$0.04</span>
       </div>
       <div id="cover-preview" style="margin-top:8px;display:none">
-        <img id="cover-img-preview" style="width:120px;height:160px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">
+        <img id="cover-img-preview" style="width:100px;height:150px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">
         <span style="font-size:12px;color:#86868b;margin-left:8px" id="cover-status"></span>
       </div>
     </div>
@@ -733,15 +749,21 @@
         <button class="btn-secondary" id="viewer-close-btn" style="padding:7px 14px;font-size:13px">✕ Close</button>
       </div>
     </div>
-    <!-- Level tabs -->
-    <div class="viewer-tabs" id="viewer-level-tabs"></div>
-    <!-- Language tabs -->
-    <div class="viewer-tabs v-tab-langs" id="viewer-lang-tabs"></div>
-    <!-- Content -->
-    <div class="viewer-body">
+    <!-- 2-pane: chaplist | reference | edit -->
+    <div class="viewer-body-2pane">
       <div class="viewer-chaplist" id="viewer-chaplist"></div>
-      <div class="viewer-right">
-        <div class="v-ch-title" id="viewer-ch-title"></div>
+      <!-- Reference pane (read-only) -->
+      <div class="viewer-pane">
+        <div class="viewer-pane-hdr">📖 Reference</div>
+        <div class="viewer-tabs" id="viewer-ref-level-tabs"></div>
+        <div class="viewer-tabs" id="viewer-ref-lang-tabs"></div>
+        <div class="v-ch-content" id="viewer-ref-text"></div>
+      </div>
+      <!-- Edit pane (editable) -->
+      <div class="viewer-pane">
+        <div class="viewer-pane-hdr">✏️ Edit</div>
+        <div class="viewer-tabs" id="viewer-edit-level-tabs"></div>
+        <div class="viewer-tabs" id="viewer-edit-lang-tabs"></div>
         <textarea class="v-ch-text" id="viewer-ch-text" spellcheck="false"></textarea>
       </div>
     </div>
@@ -1081,6 +1103,7 @@ function renderCollectionCard(stories, langCount, includeImages) {
       item.classList.toggle('selected', cb.checked);
       updateCollectionTotal();
       updateCostEstimate();
+      updateTitleFromSelection();
     });
   });
   list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
@@ -1088,6 +1111,7 @@ function renderCollectionCard(stories, langCount, includeImages) {
       cb.closest('.story-item').classList.toggle('selected', cb.checked);
       updateCollectionTotal();
       updateCostEstimate();
+      updateTitleFromSelection();
     });
   });
 
@@ -1118,6 +1142,14 @@ function getSelectedStories() {
   return [...document.querySelectorAll('input[name="story"]:checked')]
     .map(cb => collectionStories[+cb.value])
     .filter(Boolean);
+}
+
+function updateTitleFromSelection() {
+  const selected = getSelectedStories();
+  if (selected.length === 1) {
+    const titleEl = document.getElementById('book-title');
+    if (titleEl) titleEl.value = selected[0].title;
+  }
 }
 
 // ─── EPUB PARSER ───────────────────────────────────────────────────────────
@@ -1764,8 +1796,10 @@ function normalizeBlocks(text, minLen = 80) {
 // ─── STAGE 3: VIEWER / EDITOR ──────────────────────────────────────────────
 
 let viewerData   = null;  // { levels: {lvl:{lang:[{title,content}]}}, meta }
-let vLevel       = 'original';
-let vLang        = 'en';
+let vLevel       = 'original';  // edit pane
+let vLang        = 'en';        // edit pane
+let vRefLevel    = 'original';  // reference pane
+let vRefLang     = 'en';        // reference pane
 let vChap        = 0;
 
 function parseChapters(text) {
@@ -1796,20 +1830,26 @@ function renderViewer(results) {
     }
   }
 
-  vLevel = 'original';
-  vLang  = langKeys[0];
-  vChap  = 0;
+  vLevel    = 'original';
+  vLang     = langKeys[0];
+  // Reference pane defaults to B2 (if available) so you can compare Original vs B2
+  vRefLevel = lvlKeys.includes('b2') ? 'b2' : lvlKeys[0];
+  vRefLang  = langKeys[0];
+  vChap     = 0;
 
   const LEVEL_LABELS = { original:'Original', b2:'B2', b1:'B1', a2:'A2', a1:'A1' };
   const LANG_FLAGS   = { en:'🇬🇧', uk:'🇺🇦', ru:'🇷🇺', pl:'🇵🇱', de:'🇩🇪', es:'🇪🇸', fr:'🇫🇷', it:'🇮🇹', pt:'🇵🇹', cz:'🇨🇿' };
 
-  document.getElementById('viewer-level-tabs').innerHTML = lvlKeys.map(l =>
-    `<button class="v-tab${l===vLevel?' active':''}" onclick="switchVLevel('${l}')">${LEVEL_LABELS[l]||l.toUpperCase()}</button>`
-  ).join('');
+  function buildTabs(containerId, activeKey, handlerFn, keys, labels) {
+    document.getElementById(containerId).innerHTML = keys.map(k =>
+      `<button class="v-tab${k===activeKey?' active':''}" onclick="${handlerFn}('${k}')">${labels[k]||k.toUpperCase()}</button>`
+    ).join('');
+  }
 
-  document.getElementById('viewer-lang-tabs').innerHTML = langKeys.map(l =>
-    `<button class="v-tab${l===vLang?' active':''}" onclick="switchVLang('${l}')">${(LANG_FLAGS[l]||'')+' '+l.toUpperCase()}</button>`
-  ).join('');
+  buildTabs('viewer-ref-level-tabs',  vRefLevel, 'switchRefLevel', lvlKeys,  LEVEL_LABELS);
+  buildTabs('viewer-ref-lang-tabs',   vRefLang,  'switchRefLang',  langKeys, LANG_FLAGS);
+  buildTabs('viewer-edit-level-tabs', vLevel,    'switchVLevel',   lvlKeys,  LEVEL_LABELS);
+  buildTabs('viewer-edit-lang-tabs',  vLang,     'switchVLang',    langKeys, LANG_FLAGS);
 
   refreshChapList();
   showVChap(0, true); // skipSave=true: don't overwrite freshly parsed content
@@ -1829,41 +1869,58 @@ function refreshChapList() {
 function saveCurrentVChap() {
   const el = document.getElementById('viewer-ch-text');
   if (!el || !viewerData) return;
-  const chaps = viewerData.levels[vLevel][vLang];
-  if (chaps[vChap]) chaps[vChap].content = el.value;
+  const chaps = viewerData.levels[vLevel]?.[vLang];
+  if (chaps?.[vChap]) chaps[vChap].content = el.value;
 }
 
 function showVChap(idx, skipSave = false) {
   if (!skipSave) saveCurrentVChap();
   vChap = idx;
-  const chap = viewerData.levels[vLevel][vLang][idx];
-  if (!chap) return;
-  document.getElementById('viewer-ch-title').textContent = chap.title || '(untitled)';
-  document.getElementById('viewer-ch-text').value = chap.content;
+  // Reference pane (read-only)
+  const refChap = viewerData.levels[vRefLevel]?.[vRefLang]?.[idx];
+  document.getElementById('viewer-ref-text').textContent = refChap ? refChap.content : '';
+  // Edit pane
+  const editChap = viewerData.levels[vLevel]?.[vLang]?.[idx];
+  document.getElementById('viewer-ch-text').value = editChap ? editChap.content : '';
   document.querySelectorAll('.v-chap-item').forEach((el, i) => el.classList.toggle('active', i === idx));
 }
+
+// ── Edit pane tab switches ──────────────────────────────────────────────────
 
 function switchVLevel(lvl) {
   saveCurrentVChap();
   vLevel = lvl;
-  document.querySelectorAll('#viewer-level-tabs .v-tab').forEach(el =>
-    el.classList.toggle('active', el.textContent.toLowerCase() === lvl || el.textContent.toUpperCase() === lvl.toUpperCase() || el.onclick.toString().includes(`'${lvl}'`)));
-  // Re-render tabs
-  document.querySelectorAll('#viewer-level-tabs .v-tab').forEach(el => {
-    const match = el.getAttribute('onclick')?.includes(`'${lvl}'`);
-    el.classList.toggle('active', !!match);
-  });
+  document.querySelectorAll('#viewer-edit-level-tabs .v-tab').forEach(el =>
+    el.classList.toggle('active', !!el.getAttribute('onclick')?.includes(`'${lvl}'`)));
   refreshChapList();
-  showVChap(Math.min(vChap, viewerData.levels[vLevel][vLang].length - 1));
+  showVChap(Math.min(vChap, (viewerData.levels[vLevel]?.[vLang]?.length || 1) - 1));
 }
 
 function switchVLang(lang) {
   saveCurrentVChap();
   vLang = lang;
-  document.querySelectorAll('#viewer-lang-tabs .v-tab').forEach(el =>
+  document.querySelectorAll('#viewer-edit-lang-tabs .v-tab').forEach(el =>
     el.classList.toggle('active', !!el.getAttribute('onclick')?.includes(`'${lang}'`)));
   refreshChapList();
-  showVChap(Math.min(vChap, viewerData.levels[vLevel][vLang].length - 1));
+  showVChap(Math.min(vChap, (viewerData.levels[vLevel]?.[vLang]?.length || 1) - 1));
+}
+
+// ── Reference pane tab switches ─────────────────────────────────────────────
+
+function switchRefLevel(lvl) {
+  vRefLevel = lvl;
+  document.querySelectorAll('#viewer-ref-level-tabs .v-tab').forEach(el =>
+    el.classList.toggle('active', !!el.getAttribute('onclick')?.includes(`'${lvl}'`)));
+  const refChap = viewerData.levels[vRefLevel]?.[vRefLang]?.[vChap];
+  document.getElementById('viewer-ref-text').textContent = refChap ? refChap.content : '';
+}
+
+function switchRefLang(lang) {
+  vRefLang = lang;
+  document.querySelectorAll('#viewer-ref-lang-tabs .v-tab').forEach(el =>
+    el.classList.toggle('active', !!el.getAttribute('onclick')?.includes(`'${lang}'`)));
+  const refChap = viewerData.levels[vRefLevel]?.[vRefLang]?.[vChap];
+  document.getElementById('viewer-ref-text').textContent = refChap ? refChap.content : '';
 }
 
 async function downloadViewerZIP() {
@@ -1916,18 +1973,18 @@ function addTextToCover(base64, title, author) {
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width  = 1024;
-      canvas.height = 1024;
+      canvas.height = 1536;
       const ctx = canvas.getContext('2d');
 
-      // Draw base image
-      ctx.drawImage(img, 0, 0, 1024, 1024);
+      // Draw base image (portrait 2:3)
+      ctx.drawImage(img, 0, 0, 1024, 1536);
 
       // Dark gradient at top for text readability
-      const grad = ctx.createLinearGradient(0, 0, 0, 340);
-      grad.addColorStop(0, 'rgba(0,0,0,0.72)');
+      const grad = ctx.createLinearGradient(0, 0, 0, 420);
+      grad.addColorStop(0, 'rgba(0,0,0,0.78)');
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 1024, 340);
+      ctx.fillRect(0, 0, 1024, 420);
 
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'top';
@@ -1936,15 +1993,15 @@ function addTextToCover(base64, title, author) {
       ctx.shadowBlur   = 14;
       ctx.shadowOffsetY = 2;
 
-      // Title — auto font size: try 72, shrink if > 2 lines
+      // Title — auto font size: try 72, shrink if > 3 lines
       let titleFont = 'bold 72px Georgia, "Times New Roman", serif';
       let titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
       if (titleLines.length > 3) {
         titleFont  = 'bold 54px Georgia, "Times New Roman", serif';
         titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
       }
-      const titleSize   = parseInt(titleFont);
-      const lineHeight  = titleSize * 1.18;
+      const titleSize  = parseInt(titleFont);
+      const lineHeight = titleSize * 1.18;
 
       let y = 36;
       ctx.font = titleFont;
@@ -1953,11 +2010,15 @@ function addTextToCover(base64, title, author) {
         y += lineHeight;
       }
 
-      // Author
+      // Author — larger font, stroke for extra readability
       if (author) {
-        ctx.font        = `italic ${Math.round(titleSize * 0.54)}px Georgia, "Times New Roman", serif`;
-        ctx.shadowBlur  = 10;
-        ctx.fillText(`by ${author}`, 512, y + 8);
+        const authorSize = Math.round(titleSize * 0.65);
+        ctx.font         = `italic ${authorSize}px Georgia, "Times New Roman", serif`;
+        ctx.shadowBlur   = 10;
+        ctx.strokeStyle  = 'rgba(0,0,0,0.5)';
+        ctx.lineWidth    = 2;
+        ctx.strokeText(`by ${author}`, 512, y + 14);
+        ctx.fillText(`by ${author}`, 512, y + 14);
       }
 
       canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.93);
@@ -2402,6 +2463,7 @@ document.getElementById('toggle-all-stories').addEventListener('click', () => {
   document.getElementById('toggle-all-stories').textContent = all ? 'Select all' : 'Deselect all';
   updateCollectionTotal();
   updateCostEstimate();
+  updateTitleFromSelection();
 });
 
 // Results
@@ -2413,7 +2475,10 @@ document.getElementById('review-btn').addEventListener('click', () => {
 
 // Viewer
 document.getElementById('viewer-download-btn').addEventListener('click', downloadViewerZIP);
-document.getElementById('viewer-close-btn').addEventListener('click', () => hide('card-viewer'));
+document.getElementById('viewer-close-btn').addEventListener('click', () => {
+  saveCurrentVChap();
+  hide('card-viewer');
+});
 
 // Cover generation
 document.getElementById('gen-cover-btn').addEventListener('click', generateCoverImage);

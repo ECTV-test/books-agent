@@ -373,7 +373,7 @@ async function generateCover(request, env) {
       model: 'gpt-image-1',
       prompt,
       n: 1,
-      size: '1024x1024',
+      size: '1024x1536',
       output_format: 'jpeg',
       quality: 'medium',
     }),
