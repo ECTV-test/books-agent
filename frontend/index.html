@@ -1888,21 +1888,21 @@ function showVChap(idx, skipSave = false) {
 // ── Edit pane tab switches ──────────────────────────────────────────────────
 
 function switchVLevel(lvl) {
-  saveCurrentVChap();
+  saveCurrentVChap();           // save OLD level content first
   vLevel = lvl;
   document.querySelectorAll('#viewer-edit-level-tabs .v-tab').forEach(el =>
     el.classList.toggle('active', !!el.getAttribute('onclick')?.includes(`'${lvl}'`)));
   refreshChapList();
-  showVChap(Math.min(vChap, (viewerData.levels[vLevel]?.[vLang]?.length || 1) - 1));
+  showVChap(Math.min(vChap, (viewerData.levels[vLevel]?.[vLang]?.length || 1) - 1), true); // true = skipSave (already saved above)
 }
 
 function switchVLang(lang) {
-  saveCurrentVChap();
+  saveCurrentVChap();           // save OLD lang content first
   vLang = lang;
   document.querySelectorAll('#viewer-edit-lang-tabs .v-tab').forEach(el =>
     el.classList.toggle('active', !!el.getAttribute('onclick')?.includes(`'${lang}'`)));
   refreshChapList();
-  showVChap(Math.min(vChap, (viewerData.levels[vLevel]?.[vLang]?.length || 1) - 1));
+  showVChap(Math.min(vChap, (viewerData.levels[vLevel]?.[vLang]?.length || 1) - 1), true); // true = skipSave (already saved above)
 }
 
 // ── Reference pane tab switches ─────────────────────────────────────────────
@@ -2031,6 +2031,7 @@ async function generateCoverImage() {
   const title  = document.getElementById('book-title').value.trim();
   const author = document.getElementById('book-author').value.trim();
   if (!title) { toast('⚠️ Enter book title first'); return; }
+  if (!author) toast('ℹ️ Author field is empty — fill it in to show author name on cover');
 
   const btn = document.getElementById('gen-cover-btn');
   btn.disabled = true; btn.textContent = '⏳ Generating…';
