@@ -1659,14 +1659,49 @@ function renderCollectionResults() {
     return `
       <div class="story-result">
         <span class="sr-title">${r.title}</span>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
             onclick="reviewCollectionStory(${i})">🔍 Review</button>
           <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
             onclick="downloadStoryZIP(${i})">⬇️ Download</button>
+          <button class="btn-secondary" style="padding:6px 10px;font-size:12px;white-space:nowrap"
+            id="cover-btn-${i}" onclick="generateStoryCover(${i})">🖼️ Cover <span style="color:#86868b;font-size:11px">~$0.04</span></button>
         </div>
       </div>`;
   }).join('');
+}
+
+async function generateStoryCover(idx) {
+  const r = collectionResults[idx];
+  if (!r || !r.results) return;
+
+  const title  = r.title;
+  const author = document.getElementById('book-author').value.trim();
+  if (!author) toast('ℹ️ Author field is empty — fill it in to show author name on cover');
+
+  const btn = document.getElementById(`cover-btn-${idx}`);
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+
+  try {
+    const data = await apiPost('/api/generate-cover', { title, author });
+    if (!data.imageBase64) throw new Error(data.error || 'No image returned');
+
+    const coverBlob = await addTextToCover(data.imageBase64, title, author);
+    collectionResults[idx].coverBlob = coverBlob;
+
+    // Rebuild ZIP with the new per-story cover
+    const newZip = await buildZIPBlob(r.results, coverBlob);
+    collectionResults[idx].zip = newZip;
+
+    btn.disabled = false;
+    btn.innerHTML = '✅ Cover';
+    toast(`✅ Cover for "${title}" ready — re-download to get it`);
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = '🖼️ Cover <span style="color:#86868b;font-size:11px">~$0.04</span>';
+    toast(`❌ Cover failed: ${err.message}`);
+  }
 }
 
 function reviewCollectionStory(idx) {
@@ -1858,12 +1893,17 @@ function renderViewer(results) {
 }
 
 function refreshChapList() {
-  const chapters = viewerData.levels[vLevel][vLang];
-  document.getElementById('viewer-chaplist').innerHTML = chapters.map((c, i) => `
+  const chapters = viewerData.levels[vLevel]?.[vLang] || [];
+  // Fallback label: if single untitled chapter — show the book/story title
+  const storyTitle = viewerData.meta?.title || '';
+  document.getElementById('viewer-chaplist').innerHTML = chapters.map((c, i) => {
+    const label = c.title || (chapters.length === 1 && storyTitle ? storyTitle : `Chapter ${i + 1}`);
+    return `
     <div class="v-chap-item${i===vChap?' active':''}" onclick="showVChap(${i})">
       <div class="v-chap-num">Ch. ${i+1}</div>
-      <div class="v-chap-lbl">${c.title || '(untitled)'}</div>
-    </div>`).join('');
+      <div class="v-chap-lbl">${label}</div>
+    </div>`;
+  }).join('');
 }
 
 function saveCurrentVChap() {
@@ -2068,7 +2108,7 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-async function buildZIPBlob(r) {
+async function buildZIPBlob(r, coverOverride = null) {
   const zip  = new JSZip();
   const root = zip.folder(r.meta.slug);
 
@@ -2083,9 +2123,9 @@ async function buildZIPBlob(r) {
   };
   root.file('book.json', JSON.stringify(bookJson, null, 2));
 
-  // cover — uploaded file takes priority, then generated cover
+  // cover — coverOverride (per-story) wins, then uploaded file, then global generated cover
   const coverFile = document.getElementById('cover-input').files[0];
-  const coverSrc  = coverFile || generatedCoverBlob || r.cover;
+  const coverSrc  = coverOverride || coverFile || generatedCoverBlob || r.cover;
   if (coverSrc) {
     const buf = await coverSrc.arrayBuffer();
     root.file('cover.jpg', buf);
