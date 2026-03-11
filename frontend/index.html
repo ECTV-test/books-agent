@@ -1085,21 +1085,28 @@ function renderCollectionCard(stories, langCount, includeImages) {
   const subtitle = document.getElementById('collection-subtitle');
   subtitle.textContent = `${stories.length} stories found — select which to process`;
 
+  const globalAuthor = document.getElementById('book-author')?.value || '';
+  const esc = v => v.replace(/"/g, '&quot;');
   list.innerHTML = stories.map((s, i) => {
     const c = estimateCost(s.wordCount, 1, langCount, includeImages);
     return `
       <label class="story-item selected" id="story-item-${i}">
         <input type="checkbox" name="story" value="${i}" checked>
-        <span class="si-title">${s.title}</span>
+        <div style="flex:1;min-width:0">
+          <div class="si-title">${s.title}</div>
+          <input type="text" id="story-author-${i}" placeholder="Author (optional)"
+            value="${esc(globalAuthor)}" onclick="event.stopPropagation()"
+            style="font-size:11px;color:#555;border:1px solid #e5e7eb;border-radius:4px;padding:2px 7px;font-family:inherit;width:100%;max-width:220px;margin-top:3px">
+        </div>
         <span class="si-meta">${s.wordCount.toLocaleString()} words</span>
         <span class="si-cost">~$${c.total.toFixed(2)}</span>
       </label>`;
   }).join('');
 
-  // Click whole row toggles checkbox
+  // Click whole row toggles checkbox (skip if clicking an input element)
   list.querySelectorAll('.story-item').forEach(item => {
     item.addEventListener('click', e => {
-      if (e.target.type === 'checkbox') return;
+      if (e.target.tagName === 'INPUT') return; // skip checkbox AND author text input
       const cb = item.querySelector('input[type="checkbox"]');
       cb.checked = !cb.checked;
       item.classList.toggle('selected', cb.checked);
@@ -1626,7 +1633,7 @@ async function runCollectionPipeline(stories, author, settings) {
 
     const storyBook = {
       title:    story.title,
-      author:   author || '',
+      author:   story.author || author || '',  // per-story author wins over global
       chapters: [{ title: '', content: story.content }],
       wordCount: story.wordCount,
     };
@@ -1686,8 +1693,9 @@ async function generateStoryCover(idx) {
   if (!r || !r.results) return;
 
   const title  = r.title;
-  const author = document.getElementById('book-author').value.trim();
-  if (!author) toast('ℹ️ Author field is empty — fill it in to show author name on cover');
+  // Use per-story author stored in results meta (set during processing)
+  const author = r.results.meta?.author || document.getElementById('book-author').value.trim();
+  if (!author) toast('ℹ️ Author is empty — fill it in the story row to show it on the cover');
 
   const btn = document.getElementById(`cover-btn-${idx}`);
   btn.disabled = true;
@@ -1739,7 +1747,7 @@ document.getElementById('story-cover-file-input').addEventListener('change', asy
 
   try {
     const title  = r.title;
-    const author = document.getElementById('book-author').value.trim();
+    const author = r.results.meta?.author || document.getElementById('book-author').value.trim();
     const coverBlob = await addTextToImageFile(file, title, author);
     collectionResults[idx].coverBlob = coverBlob;
     const newZip = await buildZIPBlob(r.results, coverBlob);
@@ -2544,6 +2552,12 @@ document.getElementById('run-btn').addEventListener('click', async ()=>{
   btn.disabled = true; btn.textContent = '⏳ Processing…';
 
   if (collectionMode) {
+    // Read per-story author inputs and store on collectionStories objects
+    document.querySelectorAll('input[name="story"]').forEach(cb => {
+      const i = +cb.value;
+      const inp = document.getElementById(`story-author-${i}`);
+      if (inp && collectionStories[i]) collectionStories[i].author = inp.value.trim();
+    });
     const selected = getSelectedStories();
     if (!selected.length) { alert('Select at least one story'); btn.disabled=false; btn.textContent='🚀 Start Processing'; return; }
     await runCollectionPipeline(selected, author, { languages, imageStyle });
