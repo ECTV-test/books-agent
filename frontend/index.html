@@ -1663,6 +1663,7 @@ async function runCollectionPipeline(stories, author, settings) {
 
 function renderCollectionResults() {
   const list = document.getElementById('story-results-list');
+  const esc  = v => (v || '').replace(/"/g, '&quot;');
   list.innerHTML = collectionResults.map((r, i) => {
     if (r.error) {
       return `
@@ -1671,9 +1672,16 @@ function renderCollectionResults() {
           <span class="sr-status" style="color:#dc2626">❌ ${r.error}</span>
         </div>`;
     }
+    const savedAuthor = esc(r.results?.meta?.author || '');
     return `
       <div class="story-result">
         <span class="sr-title">${r.title}</span>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+          <span style="font-size:11px;color:#86868b;white-space:nowrap">Author for cover:</span>
+          <input type="text" id="result-author-${i}" value="${savedAuthor}"
+            placeholder="Author name"
+            style="font-size:11px;border:1px solid #d1d5db;border-radius:4px;padding:2px 8px;width:180px;font-family:inherit;color:#1d1d1f">
+        </div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
             onclick="reviewCollectionStory(${i})">🔍 Review</button>
@@ -1693,9 +1701,11 @@ async function generateStoryCover(idx) {
   if (!r || !r.results) return;
 
   const title  = r.title;
-  // Use per-story author stored in results meta (set during processing)
-  const author = r.results.meta?.author || document.getElementById('book-author').value.trim();
-  if (!author) toast('ℹ️ Author is empty — fill it in the story row to show it on the cover');
+  // Read author from the result card input (editable after processing)
+  const author = (document.getElementById(`result-author-${idx}`)?.value || '').trim()
+               || r.results.meta?.author
+               || document.getElementById('book-author').value.trim();
+  if (!author) toast('ℹ️ Author is empty — fill the "Author for cover" field to show it on the cover');
 
   const btn = document.getElementById(`cover-btn-${idx}`);
   btn.disabled = true;
@@ -1747,7 +1757,9 @@ document.getElementById('story-cover-file-input').addEventListener('change', asy
 
   try {
     const title  = r.title;
-    const author = r.results.meta?.author || document.getElementById('book-author').value.trim();
+    const author = (document.getElementById(`result-author-${idx}`)?.value || '').trim()
+                 || r.results.meta?.author
+                 || document.getElementById('book-author').value.trim();
     const coverBlob = await addTextToImageFile(file, title, author);
     collectionResults[idx].coverBlob = coverBlob;
     const newZip = await buildZIPBlob(r.results, coverBlob);
@@ -2066,20 +2078,8 @@ function wrapTextCover(ctx, text, maxWidth, font) {
 
 // Shared: draw title + author text overlay onto an already-prepared canvas context
 function drawCoverText(ctx, title, author) {
-  const grad = ctx.createLinearGradient(0, 0, 0, 420);
-  grad.addColorStop(0, 'rgba(0,0,0,0.78)');
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 1024, 420);
-
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle    = 'white';
-  ctx.shadowColor  = 'rgba(0,0,0,0.85)';
-  ctx.shadowBlur   = 14;
-  ctx.shadowOffsetY = 2;
-
-  let titleFont = 'bold 72px Georgia, "Times New Roman", serif';
+  // Pre-calculate layout so gradient height can match text area
+  let titleFont  = 'bold 72px Georgia, "Times New Roman", serif';
   let titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
   if (titleLines.length > 3) {
     titleFont  = 'bold 54px Georgia, "Times New Roman", serif';
@@ -2087,17 +2087,37 @@ function drawCoverText(ctx, title, author) {
   }
   const titleSize  = parseInt(titleFont);
   const lineHeight = titleSize * 1.18;
+  const authorSize = Math.round(titleSize * 0.65);
+
+  // Calculate where the last text line ends
+  let textEndY = 36 + titleLines.length * lineHeight;
+  if (author) textEndY += 14 + authorSize + 24;
+
+  // Dynamic gradient — always covers the full text block + padding
+  const gradEnd = Math.max(500, textEndY + 60);
+  const grad = ctx.createLinearGradient(0, 0, 0, gradEnd);
+  grad.addColorStop(0,   'rgba(0,0,0,0.82)');
+  grad.addColorStop(0.55,'rgba(0,0,0,0.50)');
+  grad.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 1024, gradEnd);
+
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle    = 'white';
+  ctx.shadowColor  = 'rgba(0,0,0,0.9)';
+  ctx.shadowBlur   = 14;
+  ctx.shadowOffsetY = 2;
 
   let y = 36;
   ctx.font = titleFont;
   for (const line of titleLines) { ctx.fillText(line, 512, y); y += lineHeight; }
 
   if (author) {
-    const authorSize = Math.round(titleSize * 0.65);
-    ctx.font         = `italic ${authorSize}px Georgia, "Times New Roman", serif`;
-    ctx.shadowBlur   = 10;
-    ctx.strokeStyle  = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth    = 2;
+    ctx.font        = `italic ${authorSize}px Georgia, "Times New Roman", serif`;
+    ctx.shadowBlur  = 12;
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+    ctx.lineWidth   = 3;
     ctx.strokeText(`by ${author}`, 512, y + 14);
     ctx.fillText(`by ${author}`, 512, y + 14);
   }
@@ -2139,10 +2159,16 @@ function addTextToImageFile(file, title, author) {
 }
 
 async function generateCoverImage() {
-  const title  = document.getElementById('book-title').value.trim();
-  const author = document.getElementById('book-author').value.trim();
+  const title = document.getElementById('book-title').value.trim();
   if (!title) { toast('⚠️ Enter book title first'); return; }
-  if (!author) toast('ℹ️ Author field is empty — fill it in to show author name on cover');
+
+  let author = document.getElementById('book-author').value.trim();
+  if (!author) {
+    const entered = prompt('Enter the author name (shown on the cover):', '');
+    if (entered === null) return; // user cancelled prompt
+    author = entered.trim();
+    document.getElementById('book-author').value = author; // save for later
+  }
 
   const btn = document.getElementById('gen-cover-btn');
   btn.disabled = true; btn.textContent = '⏳ Generating…';
