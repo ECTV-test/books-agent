@@ -1712,7 +1712,8 @@ async function generateStoryCover(idx) {
   btn.innerHTML = '⏳';
 
   try {
-    const data = await apiPost('/api/generate-cover', { title, author });
+    const description = r.results.descriptions?.en || '';
+    const data = await apiPost('/api/generate-cover', { title, author, description });
     if (!data.imageBase64) throw new Error(data.error || 'No image returned');
 
     const coverBlob = await addTextToCover(data.imageBase64, title, author);
@@ -2079,13 +2080,15 @@ function wrapTextCover(ctx, text, maxWidth, font) {
 // Shared: draw title + author text overlay onto an already-prepared canvas context
 function drawCoverText(ctx, title, author) {
   // Pre-calculate layout so gradient height can match text area
-  let titleFont  = 'bold 72px Georgia, "Times New Roman", serif';
+  // NOTE: keep titleSize as a separate number — parseInt('bold 72px...') = NaN!
+  let titleSize  = 72;
+  let titleFont  = `bold ${titleSize}px Georgia, "Times New Roman", serif`;
   let titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
   if (titleLines.length > 3) {
-    titleFont  = 'bold 54px Georgia, "Times New Roman", serif';
+    titleSize  = 54;
+    titleFont  = `bold ${titleSize}px Georgia, "Times New Roman", serif`;
     titleLines = wrapTextCover(ctx, title.toUpperCase(), 880, titleFont);
   }
-  const titleSize  = parseInt(titleFont);
   const lineHeight = titleSize * 1.18;
   const authorSize = Math.round(titleSize * 0.65);
 
@@ -2177,7 +2180,9 @@ async function generateCoverImage() {
   document.getElementById('cover-preview').style.alignItems = 'center';
 
   try {
-    const data = await apiPost('/api/generate-cover', { title, author });
+    // Pass the English description as context for genre-aware prompt generation
+    const description = window.bookResults?.descriptions?.en || '';
+    const data = await apiPost('/api/generate-cover', { title, author, description });
     if (!data.imageBase64) throw new Error(data.error || 'No image returned');
 
     // Add title + author text overlay via Canvas

@@ -361,7 +361,37 @@ Output ONLY the description text, no labels or notes.`,
 
 async function generateCover(request, env) {
   const { title, author, description } = await request.json();
-  const prompt = `Book cover art for "${title}" by ${author}. ${description ? description + '.' : ''} Atmospheric, professional illustration. No text, no letters, no words anywhere in the image.`;
+
+  // Step 1: GPT-4o-mini writes a genre-aware visual prompt for the cover
+  const promptResult = await openai(env.OPENAI_API_KEY, {
+    model: 'gpt-4o-mini',
+    messages: [{
+      role: 'user',
+      content: `Write a detailed visual prompt for an AI image generator to create a book cover illustration.
+
+Book title: "${title}"
+Author: ${author || 'Unknown'}
+${description ? `Description: ${description}` : ''}
+
+Rules:
+- Detect the genre/mood from the title and description (children, fairy tale, adventure, detective, mystery, drama, romance, classic literature, sci-fi, thriller, etc.)
+- Children / fairy tale → bright warm colors, soft lighting, playful characters, sunshine, flowers, magical atmosphere
+- Detective / mystery / thriller → dark moody atmosphere, shadows, muted blues and grays, fog, suspenseful
+- Adventure → vivid dynamic colors, dramatic sky, action, sweeping landscape
+- Romance → warm soft tones, golden light, elegant composition, emotional atmosphere
+- Drama / classic literature → painterly, rich earthy tones, period-appropriate setting
+- Sci-fi / fantasy → otherworldly colors, dramatic lighting, imaginative world-building
+- Describe a SCENE that captures the book's essence — not just abstract shapes
+- Portrait composition (2:3 ratio), full-bleed illustration, suitable for a book cover
+- Absolutely NO text, letters, numbers, words, typography, or signs in the image
+- Professional quality, painterly or illustrative style
+- Output ONLY the visual prompt. No explanation. Max 90 words.`,
+    }],
+    max_tokens: 150,
+  });
+
+  const visualPrompt = promptResult.choices[0].message.content.trim()
+    + ' No text, no letters, no words anywhere in the image. Portrait book cover format.';
 
   const response = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
@@ -371,7 +401,7 @@ async function generateCover(request, env) {
     },
     body: JSON.stringify({
       model: 'gpt-image-1',
-      prompt,
+      prompt: visualPrompt,
       n: 1,
       size: '1024x1536',
       output_format: 'jpeg',
