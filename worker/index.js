@@ -300,6 +300,16 @@ async function translateOpenAI(text, targetLang, level, env) {
   const levelInstructions = (TRANSLATE_LEVEL_INSTRUCTIONS[level] || TRANSLATE_LEVEL_INSTRUCTIONS.original)(langName);
   const model = await env.KV.get('translate_model') || 'gpt-4o-mini';
 
+  // Tag every non-empty line with [NNN] so GPT is forced to translate
+  // line-by-line — a text instruction alone ("keep each sentence on its own
+  // line") is not reliable enough; numbered tags make the structure explicit.
+  const inputLines = text.split('\n');
+  let tagIdx = 0;
+  const taggedLines = inputLines.map(line =>
+    line.trim() === '' ? '' : `[${String(++tagIdx).padStart(3, '0')}] ${line}`
+  );
+  const taggedText = taggedLines.join('\n');
+
   const result = await openai(env.OPENAI_API_KEY, {
     model,
     messages: [
@@ -314,20 +324,27 @@ Name rules (strict):
 - Place names: keep English or use established local equivalents
 - A name must be identical in every level of the same book
 
-Formatting rules (preserve exactly):
-- Each sentence remains on its own line — do not merge lines
-- Keep blank lines between paragraphs exactly as in the source
-- Each speaker's dialogue starts on a new line
+CRITICAL formatting rules:
+- Every non-empty input line starts with a tag like [001], [002], etc.
+- Translate each tagged line into EXACTLY ONE output line, keeping its tag at the start
+- Keep ALL tags in order — one tag per output line, no merging, no splitting
+- Keep blank lines (lines without a tag) exactly where they appear
 - Keep [[CHAPTER: ...]] markers — translate only the chapter name inside them
 
-Output ONLY the translation, no notes or explanations.`,
+Output ONLY the translated tagged lines and blank lines. No notes, no explanations.`,
       },
-      { role: 'user', content: text },
+      { role: 'user', content: taggedText },
     ],
     temperature: 0.2,
   });
 
-  return json({ text: result.choices[0].message.content.trim() });
+  // Strip [NNN] tags from every line and return clean translated text
+  const translatedLines = result.choices[0].message.content
+    .trim()
+    .split('\n')
+    .map(line => line.replace(/^\[\d{3}\]\s?/, ''));
+
+  return json({ text: translatedLines.join('\n') });
 }
 
 // ─── Describe ────────────────────────────────────────────────────────────────
