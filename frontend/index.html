@@ -1642,12 +1642,12 @@ async function runCollectionPipeline(stories, author, settings) {
 
     try {
       const { results, zipBlob } = await runSingleStory(storyBook, settings);
-      collectionResults.push({ title: story.title, slug: results.meta.slug, zip: zipBlob, results });
+      collectionResults.push({ title: story.title, slug: results.meta.slug, zip: zipBlob, results, storyBook });
     } catch (err) {
       document.querySelectorAll('.ps-icon').forEach(el => {
         if (el.textContent === '⏳') el.textContent = '❌';
       });
-      collectionResults.push({ title: story.title, slug: slugify(story.title), zip: null, error: err.message });
+      collectionResults.push({ title: story.title, slug: slugify(story.title), zip: null, error: err.message, storyBook });
       toast(`❌ "${story.title}": ${err.message}`);
     }
   }
@@ -1665,32 +1665,54 @@ function renderCollectionResults() {
   const list = document.getElementById('story-results-list');
   const esc  = v => (v || '').replace(/"/g, '&quot;');
   list.innerHTML = collectionResults.map((r, i) => {
+    const thumb = r.coverUrl
+      ? `<img id="cover-thumb-${i}" src="${r.coverUrl}"
+           style="width:44px;height:66px;object-fit:cover;border-radius:5px;flex-shrink:0;box-shadow:0 1px 4px rgba(0,0,0,.15)">`
+      : `<div id="cover-thumb-${i}"
+           style="width:44px;height:66px;border-radius:5px;flex-shrink:0;background:#f3f4f6;border:1.5px dashed #d1d5db"></div>`;
+
     if (r.error) {
       return `
         <div class="story-result">
-          <span class="sr-title">${r.title}</span>
-          <span class="sr-status" style="color:#dc2626">❌ ${r.error}</span>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            ${thumb}
+            <div style="flex:1;min-width:0">
+              <span class="sr-title">${r.title}</span>
+              <span class="sr-status" style="color:#dc2626;display:block;margin-bottom:6px">❌ ${r.error}</span>
+              <button class="btn-secondary" style="padding:5px 12px;font-size:12px"
+                id="retry-btn-${i}" onclick="retryStory(${i})">🔄 Retry</button>
+            </div>
+          </div>
         </div>`;
     }
+
     const savedAuthor = esc(r.results?.meta?.author || '');
+    const coverLabel  = r.coverUrl ? '🖼️ Regenerate' : '🖼️ Cover <span style="color:#86868b;font-size:11px">~$0.04</span>';
     return `
       <div class="story-result">
-        <span class="sr-title">${r.title}</span>
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-          <span style="font-size:11px;color:#86868b;white-space:nowrap">Author for cover:</span>
-          <input type="text" id="result-author-${i}" value="${savedAuthor}"
-            placeholder="Author name"
-            style="font-size:11px;border:1px solid #d1d5db;border-radius:4px;padding:2px 8px;width:180px;font-family:inherit;color:#1d1d1f">
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
-            onclick="reviewCollectionStory(${i})">🔍 Review</button>
-          <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
-            onclick="downloadStoryZIP(${i})">⬇️ Download</button>
-          <button class="btn-secondary" style="padding:6px 10px;font-size:12px;white-space:nowrap"
-            id="cover-btn-${i}" onclick="generateStoryCover(${i})">🖼️ Cover <span style="color:#86868b;font-size:11px">~$0.04</span></button>
-          <button class="btn-secondary" style="padding:6px 10px;font-size:12px;white-space:nowrap"
-            id="upload-btn-${i}" onclick="uploadStoryCover(${i})">📎 Upload</button>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          ${thumb}
+          <div style="flex:1;min-width:0">
+            <span class="sr-title">${r.title}</span>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+              <span style="font-size:11px;color:#86868b;white-space:nowrap">Author for cover:</span>
+              <input type="text" id="result-author-${i}" value="${savedAuthor}"
+                placeholder="Author name"
+                style="font-size:11px;border:1px solid #d1d5db;border-radius:4px;padding:2px 8px;width:180px;font-family:inherit;color:#1d1d1f">
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
+                onclick="reviewCollectionStory(${i})">🔍 Review</button>
+              <button class="btn-secondary" style="padding:6px 14px;font-size:13px"
+                onclick="downloadStoryZIP(${i})">⬇️ Download</button>
+              <button class="btn-secondary" style="padding:6px 10px;font-size:12px;white-space:nowrap"
+                id="cover-btn-${i}" onclick="generateStoryCover(${i})">${coverLabel}</button>
+              <button class="btn-secondary" style="padding:6px 10px;font-size:12px;white-space:nowrap"
+                id="upload-btn-${i}" onclick="uploadStoryCover(${i})">📎 Upload</button>
+              <button class="btn-secondary" style="padding:6px 10px;font-size:12px;white-space:nowrap;color:#6b7280"
+                id="retry-btn-${i}" onclick="retryStory(${i})">🔄 Retry</button>
+            </div>
+          </div>
         </div>
       </div>`;
   }).join('');
@@ -1717,14 +1739,14 @@ async function generateStoryCover(idx) {
     if (!data.imageBase64) throw new Error(data.error || 'No image returned');
 
     const coverBlob = await addTextToCover(data.imageBase64, title, author);
-    collectionResults[idx].coverBlob = coverBlob;
+    setCoverThumb(idx, coverBlob);
 
     // Rebuild ZIP with the new per-story cover
     const newZip = await buildZIPBlob(r.results, coverBlob);
     collectionResults[idx].zip = newZip;
 
     btn.disabled = false;
-    btn.innerHTML = '✅ Cover';
+    btn.innerHTML = '🖼️ Regenerate';
     toast(`✅ Cover for "${title}" ready — re-download to get it`);
   } catch (err) {
     btn.disabled = false;
@@ -1762,7 +1784,7 @@ document.getElementById('story-cover-file-input').addEventListener('change', asy
                  || r.results.meta?.author
                  || document.getElementById('book-author').value.trim();
     const coverBlob = await addTextToImageFile(file, title, author);
-    collectionResults[idx].coverBlob = coverBlob;
+    setCoverThumb(idx, coverBlob);
     const newZip = await buildZIPBlob(r.results, coverBlob);
     collectionResults[idx].zip = newZip;
     if (btn) { btn.disabled = false; btn.textContent = '✅ Uploaded'; }
@@ -1772,6 +1794,72 @@ document.getElementById('story-cover-file-input').addEventListener('change', asy
     toast(`❌ ${err.message}`);
   }
 });
+
+// ─── Cover thumbnail helper ─────────────────────────────────────────────────
+
+function setCoverThumb(idx, blob) {
+  if (collectionResults[idx].coverUrl) URL.revokeObjectURL(collectionResults[idx].coverUrl);
+  const url = URL.createObjectURL(blob);
+  collectionResults[idx].coverBlob = blob;
+  collectionResults[idx].coverUrl  = url;
+  // Update thumbnail element in place (no full re-render needed)
+  const el = document.getElementById(`cover-thumb-${idx}`);
+  if (!el) return;
+  const img = document.createElement('img');
+  img.src   = url;
+  img.style.cssText = 'width:44px;height:66px;object-fit:cover;border-radius:5px;box-shadow:0 1px 4px rgba(0,0,0,.15)';
+  el.replaceWith(img);
+  img.id = `cover-thumb-${idx}`;
+}
+
+// ─── Retry single story ─────────────────────────────────────────────────────
+
+async function retryStory(idx) {
+  const r = collectionResults[idx];
+  if (!r || !r.storyBook) return;
+
+  const btn = document.getElementById(`retry-btn-${idx}`);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Retrying…'; }
+
+  const languages  = [...document.querySelectorAll('input[name="lang"]:checked')].map(c => c.value);
+  const imageStyle = document.querySelector('input[name="img-style"]:checked')?.value || 'none';
+
+  const h2 = document.getElementById('card-progress').querySelector('h2');
+  h2.textContent = `Retrying: ${r.storyBook.title}`;
+  renderSteps(PIPELINE_STEPS);
+  show('card-progress');
+  document.getElementById('card-progress').scrollIntoView({ behavior: 'smooth' });
+
+  try {
+    const { results, zipBlob } = await runSingleStory(r.storyBook, { languages, imageStyle });
+    collectionResults[idx] = {
+      title:     r.storyBook.title,
+      slug:      results.meta.slug,
+      zip:       zipBlob,
+      results,
+      storyBook: r.storyBook,
+      // Carry over existing cover if any
+      coverBlob: r.coverBlob || null,
+      coverUrl:  r.coverUrl  || null,
+    };
+    toast(`✅ "${r.storyBook.title}" reprocessed`);
+  } catch (err) {
+    collectionResults[idx] = {
+      title:     r.storyBook.title,
+      slug:      slugify(r.storyBook.title),
+      zip:       null,
+      error:     err.message,
+      storyBook: r.storyBook,
+      coverBlob: r.coverBlob || null,
+      coverUrl:  r.coverUrl  || null,
+    };
+    toast(`❌ Retry failed: ${err.message}`);
+  }
+
+  hide('card-progress');
+  renderCollectionResults();
+  document.getElementById('card-results').scrollIntoView({ behavior: 'smooth' });
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 
