@@ -1026,8 +1026,9 @@ let parsedBook      = null;
 let collectionMode  = false;      // true when a collection is detected
 let collectionStories = [];       // [{title, content, wordCount, chapters}]
 let collectionResults = [];       // [{title, zip}] after processing
-let adminUnlocked = sessionStorage.getItem('adminUnlocked') === '1';
-let editorToken   = localStorage.getItem('editorToken') || '';
+let adminUnlocked  = sessionStorage.getItem('adminUnlocked') === '1';
+let editorToken    = localStorage.getItem('editorToken') || '';
+let activeProvider = 'openai'; // updated after login; controls batch toggle visibility
 
 // ─── COLLECTION / STRUCTURE ────────────────────────────────────────────────
 
@@ -1396,7 +1397,7 @@ async function handleFile(file) {
     }
 
     // Show base UI (languages, options needed before structure detection cost calc)
-    show('card-langs'); show('card-options'); show('batch-toggle'); loadBatchJobs();
+    show('card-langs'); show('card-options'); updateBatchToggleVisibility(); loadBatchJobs();
 
     // Structure detection for TXT without clear chapters
     if (book.needsStructureDetection && book.rawText) {
@@ -2614,6 +2615,7 @@ async function submitLogin() {
       localStorage.setItem('editorToken', pw);
       input.value = '';
       hideLoginOverlay();
+      fetchActiveProvider();
     } else {
       input.classList.add('error');
       errEl.textContent = data.error || 'Wrong password';
@@ -2685,6 +2687,29 @@ async function unlockAdmin() {
   btn.disabled = false; btn.textContent = 'Unlock';
 }
 
+async function fetchActiveProvider() {
+  try {
+    const res = await fetch(`${WORKER_URL}/api/config`, {
+      headers: editorToken ? { 'X-Editor-Token': editorToken } : {},
+    });
+    if (!res.ok) return;
+    const cfg = await res.json();
+    activeProvider = cfg.provider || 'openai';
+    updateBatchToggleVisibility();
+  } catch { /* silent — non-critical */ }
+}
+
+function updateBatchToggleVisibility() {
+  const toggle = document.getElementById('batch-toggle');
+  if (!toggle) return;
+  // Only show if OpenAI is active provider AND a file is loaded AND NOT collection mode
+  if (activeProvider === 'openai' && parsedBook && !collectionMode) {
+    toggle.hidden = false;
+  } else {
+    toggle.hidden = true;
+  }
+}
+
 async function loadAdminConfig() {
   const keysList = document.getElementById('keys-list');
   keysList.textContent = 'Loading…';
@@ -2754,6 +2779,7 @@ async function saveProvider() {
     const d2 = await apiPost('/api/models', { adaptModel, translateModel });
     if (!d2.ok) throw new Error(d2.error);
     toast('✅ Settings saved');
+    if (radio) { activeProvider = radio.value; updateBatchToggleVisibility(); }
   } catch (err) { toast(`❌ ${err.message}`); }
   btn.disabled = false; btn.textContent = 'Save Settings';
 }
@@ -2987,6 +3013,7 @@ if (adminUnlocked) document.getElementById('admin-btn').classList.add('unlocked'
 // Show/hide login overlay based on stored token
 if (editorToken) {
   hideLoginOverlay();
+  fetchActiveProvider();
 } else {
   // login-overlay is visible by default (no hidden attr)
   document.getElementById('logout-btn').classList.remove('visible');
