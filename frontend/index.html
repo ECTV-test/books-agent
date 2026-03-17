@@ -219,6 +219,42 @@
     .ce-item { display: flex; gap: 4px; align-items: center; }
     .ce-item b { color: #1d1d1f; }
 
+    /* ── Batch mode toggle ── */
+    .batch-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: #f5f5f7;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .batch-toggle input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #0071e3; }
+    .batch-toggle-label { font-size: 13px; color: #1d1d1f; line-height: 1.4; }
+    .batch-toggle-label b { color: #0071e3; }
+    .batch-toggle-label small { color: #86868b; display: block; font-size: 11px; margin-top: 1px; }
+
+    /* ── Batch jobs ── */
+    .batch-job {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .bj-icon { font-size: 20px; flex-shrink: 0; }
+    .bj-info { flex: 1; min-width: 0; }
+    .bj-title { font-weight: 600; font-size: 13px; color: #1d1d1f; }
+    .bj-meta  { font-size: 11px; color: #86868b; margin-top: 2px; }
+    .bj-status-pending   { color: #d97706; }
+    .bj-status-completed { color: #16a34a; }
+    .bj-status-failed    { color: #dc2626; }
+    .bj-status-downloaded { color: #6b7280; }
+
     /* ── Run button ── */
     #run-btn {
       width: 100%;
@@ -713,7 +749,25 @@
   <div id="cost-estimate" hidden></div>
 
   <!-- Run -->
+  <label class="batch-toggle" id="batch-toggle" hidden>
+    <input type="checkbox" id="batch-mode-cb">
+    <div class="batch-toggle-label">
+      <b>🌙 Batch mode</b> — submit translations to OpenAI Batch API (−50% cost)
+      <small>Adapt runs now (~2-5 min). Translations run overnight. Close the browser after submit.</small>
+    </div>
+  </label>
   <button id="run-btn" hidden>🚀 Start Processing</button>
+
+  <!-- Batch Jobs -->
+  <div class="card" id="card-batch-jobs" hidden>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h2 style="margin:0">🌙 Batch Jobs</h2>
+      <button class="btn-secondary" style="padding:5px 12px;font-size:12px" onclick="loadBatchJobs()">🔄 Refresh</button>
+    </div>
+    <div id="batch-jobs-list">
+      <p style="color:#86868b;font-size:13px">No batch jobs yet.</p>
+    </div>
+  </div>
 
   <!-- Progress -->
   <div class="card" id="card-progress" hidden>
@@ -1342,7 +1396,7 @@ async function handleFile(file) {
     }
 
     // Show base UI (languages, options needed before structure detection cost calc)
-    show('card-langs'); show('card-options');
+    show('card-langs'); show('card-options'); show('batch-toggle'); loadBatchJobs();
 
     // Structure detection for TXT without clear chapters
     if (book.needsStructureDetection && book.rawText) {
@@ -1355,6 +1409,7 @@ async function handleFile(file) {
       if (structure.type === 'collection' && structure.stories && structure.stories.length > 1) {
         // Split into individual stories
         collectionMode = true;
+        hide('batch-toggle');
         const stories = splitIntoStories(book.rawText, structure.stories);
         if (stories.length > 1) {
           // Use total word count across all stories
@@ -1423,7 +1478,14 @@ async function runPipeline(book, settings) {
   document.getElementById('card-progress').scrollIntoView({ behavior:'smooth' });
 
   try {
-    const { results } = await runSingleStory(book, settings);
+    const pipelineResult = await runSingleStory(book, settings);
+
+    if (pipelineResult.batchMode) {
+      showBatchSubmitted(pipelineResult.jobId, pipelineResult.meta);
+      return;
+    }
+
+    const { results } = pipelineResult;
     window.bookResults = results;
     renderResultsSummary(results);
     hide('results-collection');
@@ -1501,6 +1563,23 @@ async function runSingleStory(book, settings) {
 
     chapterTexts[key] = adapted;
     setStep(stepId,'done', `${n} chapters`);
+  }
+
+  // ── 5.5 Batch mode: submit translations to OpenAI Batch API ────────────
+  if (settings.batchMode) {
+    const excerpt = chapterTexts.original.slice(0, 2).join('\n\n');
+    setStep('translate', 'running', 'Submitting to OpenAI Batch API…');
+    setStep('metadata',  'pending');
+    setStep('images',    'done', 'Skipped (batch mode)');
+    setStep('pack',      'pending');
+
+    const jobId = await submitTranslationBatch(chapterTexts, book, settings, excerpt);
+
+    setStep('translate', 'done', `${(settings.languages.length * 5 * n) + settings.languages.length + 1} requests queued`);
+    setStep('metadata',  'done', 'Included in batch');
+    setStep('pack',      'done', `Job ${jobId}`);
+
+    return { batchMode: true, jobId, meta: { title: book.title, author: book.author } };
   }
 
   // ── 6. Translate all levels × all languages ────────────────────────────
@@ -1615,6 +1694,130 @@ async function runSingleStory(book, settings) {
   setStep('pack','done');
 
   return { results, zipBlob };
+}
+
+// ─── BATCH API ─────────────────────────────────────────────────────────────
+
+function genJobId() {
+  return 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+async function submitTranslationBatch(chapterTexts, book, settings, excerpt) {
+  const jobId = genJobId();
+  const data = await apiPost('/api/batch-submit', {
+    jobId,
+    meta: {
+      title:         book.title,
+      author:        book.author,
+      slug:          slugify(book.title),
+      detectedLevel: book.detectedLevel || 'B1',
+      languages:     settings.languages,
+      imageStyle:    settings.imageStyle,
+    },
+    chapterTexts,
+    excerpt,
+  });
+  if (data.error) throw new Error(data.error);
+
+  // Persist jobId in localStorage
+  const stored = JSON.parse(localStorage.getItem('batchJobIds') || '[]');
+  stored.unshift(jobId);
+  localStorage.setItem('batchJobIds', JSON.stringify(stored.slice(0, 50)));
+
+  return jobId;
+}
+
+function showBatchSubmitted(jobId, meta) {
+  toast(`✅ Batch submitted for "${meta?.title}"! Close this tab and come back later.`);
+  loadBatchJobs();
+  show('card-batch-jobs');
+  document.getElementById('card-batch-jobs').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function loadBatchJobs() {
+  const res = await fetch(WORKER_URL + '/api/batch-jobs', {
+    headers: { 'X-Editor-Token': localStorage.getItem('editorToken') || '' },
+  }).catch(() => null);
+  const jobsData = res?.ok ? await res.json() : { jobs: [] };
+  const jobs = jobsData.jobs || [];
+
+  const container = document.getElementById('batch-jobs-list');
+  if (!container) return;
+
+  if (!jobs.length) {
+    container.innerHTML = '<p style="color:#86868b;font-size:13px">No batch jobs yet.</p>';
+    hide('card-batch-jobs');
+    return;
+  }
+
+  show('card-batch-jobs');
+  container.innerHTML = jobs.map(job => {
+    const statusIcon = {
+      pending:    '⏳',
+      validating: '🔍',
+      in_progress:'⚙️',
+      completed:  '✅',
+      failed:     '❌',
+      expired:    '⏰',
+      downloaded: '📦',
+      cancelled:  '🚫',
+    }[job.status] || '❓';
+
+    const statusClass = job.status === 'completed' ? 'bj-status-completed'
+                      : job.status === 'failed' || job.status === 'expired' ? 'bj-status-failed'
+                      : job.status === 'downloaded' ? 'bj-status-downloaded'
+                      : 'bj-status-pending';
+
+    const created  = new Date(job.created_at).toLocaleString();
+    const langList = (job.languages || []).join(', ').toUpperCase() || 'EN only';
+    const reqs     = job.request_count ? `${job.request_count} requests` : '';
+
+    const actions = job.status === 'completed'
+      ? `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="downloadBatchJob('${job.id}')">⬇️ Download ZIP</button>`
+      : job.status === 'pending' || job.status === 'validating' || job.status === 'in_progress'
+      ? `<button class="btn-secondary" style="padding:5px 12px;font-size:12px" onclick="checkBatchJob('${job.id}')">🔄 Check</button>`
+      : '';
+
+    return `
+      <div class="batch-job">
+        <div class="bj-icon">${statusIcon}</div>
+        <div class="bj-info">
+          <div class="bj-title">${job.title}${job.author ? ` — ${job.author}` : ''}</div>
+          <div class="bj-meta">${langList} · ${reqs} · ${created} · <span class="${statusClass}">${job.status}</span></div>
+        </div>
+        <div>${actions}</div>
+      </div>`;
+  }).join('');
+}
+
+async function checkBatchJob(jobId) {
+  const res = await fetch(`${WORKER_URL}/api/batch-status?id=${jobId}`, {
+    headers: { 'X-Editor-Token': localStorage.getItem('editorToken') || '' },
+  });
+  const data = await res.json();
+  if (data.error) { toast(`❌ ${data.error}`); return; }
+
+  toast(`Status: ${data.status}${data.request_counts ? ` (${data.request_counts.completed || 0}/${data.request_counts.total || '?'} done)` : ''}`);
+  await loadBatchJobs();
+}
+
+async function downloadBatchJob(jobId) {
+  toast('⏳ Downloading batch results…');
+  try {
+    const data = await apiPost('/api/batch-download', { jobId });
+    if (data.error) throw new Error(data.error);
+
+    const { results } = data;
+    window.bookResults = results;
+
+    // Build ZIP using existing function
+    const zipBlob = await buildZIPBlob(results);
+    triggerDownload(zipBlob, `${results.meta.slug || 'book'}.zip`);
+    toast(`✅ Downloaded: ${results.meta.title}`);
+    await loadBatchJobs(); // refresh to show 'downloaded' status
+  } catch (err) {
+    toast(`❌ Download failed: ${err.message}`);
+  }
 }
 
 // ─── COLLECTION PIPELINE ───────────────────────────────────────────────────
@@ -2635,7 +2838,7 @@ document.getElementById('fp-remove').addEventListener('click', ()=>{
   resetCoverPreview();
   resetDropZone();
   ['card-collection','card-info','card-langs','card-options','cost-estimate',
-   'run-btn','card-progress','card-results','card-viewer'].forEach(hide);
+   'run-btn','batch-toggle','card-batch-jobs','card-progress','card-results','card-viewer'].forEach(hide);
 });
 
 // Languages
@@ -2666,6 +2869,7 @@ document.getElementById('run-btn').addEventListener('click', async ()=>{
   const languages = [...document.querySelectorAll('input[name="lang"]:checked')].map(c=>c.value);
   if (!languages.length) { alert('Select at least one language'); return; }
   const imageStyle = document.querySelector('input[name="img-style"]:checked').value;
+  const batchMode  = !collectionMode && document.getElementById('batch-mode-cb')?.checked;
   const author = document.getElementById('book-author').value.trim();
   const btn = document.getElementById('run-btn');
   btn.disabled = true; btn.textContent = '⏳ Processing…';
@@ -2685,7 +2889,7 @@ document.getElementById('run-btn').addEventListener('click', async ()=>{
     if (!title) { alert('Enter book title'); btn.disabled=false; btn.textContent='🚀 Start Processing'; return; }
     parsedBook.title  = title;
     parsedBook.author = author;
-    await runPipeline(parsedBook, { languages, imageStyle });
+    await runPipeline(parsedBook, { languages, imageStyle, batchMode });
   }
 });
 
@@ -2724,6 +2928,7 @@ document.getElementById('gen-cover-btn').addEventListener('click', generateCover
 document.getElementById('epub-use-collection-btn').addEventListener('click', () => {
   if (!parsedBook) return;
   collectionMode = true;
+  hide('batch-toggle');
   // Convert EPUB chapters into collectionStories format
   const stories = parsedBook.chapters
     .filter(c => c.content.trim().length >= 80)
