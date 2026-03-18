@@ -1410,7 +1410,6 @@ async function handleFile(file) {
       if (structure.type === 'collection' && structure.stories && structure.stories.length > 1) {
         // Split into individual stories
         collectionMode = true;
-        hide('batch-toggle');
         const stories = splitIntoStories(book.rawText, structure.stories);
         if (stories.length > 1) {
           // Use total word count across all stories
@@ -1845,8 +1844,14 @@ async function runCollectionPipeline(stories, author, settings) {
     renderSteps(PIPELINE_STEPS);
 
     try {
-      const { results, zipBlob } = await runSingleStory(storyBook, settings);
-      collectionResults.push({ title: story.title, slug: results.meta.slug, zip: zipBlob, results, storyBook });
+      const pipelineResult = await runSingleStory(storyBook, settings);
+      if (pipelineResult.batchMode) {
+        collectionResults.push({ title: story.title, slug: slugify(story.title), zip: null, batchJobId: pipelineResult.jobId, storyBook });
+        toast(`📦 "${story.title}" → batch job ${pipelineResult.jobId}`);
+      } else {
+        const { results, zipBlob } = pipelineResult;
+        collectionResults.push({ title: story.title, slug: results.meta.slug, zip: zipBlob, results, storyBook });
+      }
     } catch (err) {
       document.querySelectorAll('.ps-icon').forEach(el => {
         if (el.textContent === '⏳') el.textContent = '❌';
@@ -1874,6 +1879,20 @@ function renderCollectionResults() {
            style="width:44px;height:66px;object-fit:cover;border-radius:5px;flex-shrink:0;box-shadow:0 1px 4px rgba(0,0,0,.15)">`
       : `<div id="cover-thumb-${i}"
            style="width:44px;height:66px;border-radius:5px;flex-shrink:0;background:#f3f4f6;border:1.5px dashed #d1d5db"></div>`;
+
+    if (r.batchJobId) {
+      return `
+        <div class="story-result">
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            ${thumb}
+            <div style="flex:1;min-width:0">
+              <span class="sr-title">${r.title}</span>
+              <span class="sr-status" style="color:#0071e3;display:block;margin-bottom:6px">⏳ Batch queued · Job ${r.batchJobId}</span>
+              <span style="font-size:11px;color:#86868b">Check status in the <b>Batch Jobs</b> panel above</span>
+            </div>
+          </div>
+        </div>`;
+    }
 
     if (r.error) {
       return `
@@ -2702,8 +2721,8 @@ async function fetchActiveProvider() {
 function updateBatchToggleVisibility() {
   const toggle = document.getElementById('batch-toggle');
   if (!toggle) return;
-  // Only show if OpenAI is active provider AND a file is loaded AND NOT collection mode
-  if (activeProvider === 'openai' && parsedBook && !collectionMode) {
+  // Only show if OpenAI is active provider AND a file is loaded
+  if (activeProvider === 'openai' && parsedBook) {
     toggle.hidden = false;
   } else {
     toggle.hidden = true;
@@ -2895,7 +2914,7 @@ document.getElementById('run-btn').addEventListener('click', async ()=>{
   const languages = [...document.querySelectorAll('input[name="lang"]:checked')].map(c=>c.value);
   if (!languages.length) { alert('Select at least one language'); return; }
   const imageStyle = document.querySelector('input[name="img-style"]:checked').value;
-  const batchMode  = !collectionMode && document.getElementById('batch-mode-cb')?.checked;
+  const batchMode  = document.getElementById('batch-mode-cb')?.checked ?? false;
   const author = document.getElementById('book-author').value.trim();
   const btn = document.getElementById('run-btn');
   btn.disabled = true; btn.textContent = '⏳ Processing…';
@@ -2909,7 +2928,7 @@ document.getElementById('run-btn').addEventListener('click', async ()=>{
     });
     const selected = getSelectedStories();
     if (!selected.length) { alert('Select at least one story'); btn.disabled=false; btn.textContent='🚀 Start Processing'; return; }
-    await runCollectionPipeline(selected, author, { languages, imageStyle });
+    await runCollectionPipeline(selected, author, { languages, imageStyle, batchMode });
   } else {
     const title = document.getElementById('book-title').value.trim();
     if (!title) { alert('Enter book title'); btn.disabled=false; btn.textContent='🚀 Start Processing'; return; }
@@ -2954,7 +2973,6 @@ document.getElementById('gen-cover-btn').addEventListener('click', generateCover
 document.getElementById('epub-use-collection-btn').addEventListener('click', () => {
   if (!parsedBook) return;
   collectionMode = true;
-  hide('batch-toggle');
   // Convert EPUB chapters into collectionStories format
   const stories = parsedBook.chapters
     .filter(c => c.content.trim().length >= 80)
