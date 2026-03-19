@@ -252,7 +252,7 @@ Formatting rules (strict):
 - Each sentence on its own line
 - Each speaker's dialogue starts on a new line
 - One blank line between paragraphs
-- Keep [[CHAPTER: ...]] markers exactly as they appear, on their own line
+- Keep [[CHAPTER: ...]] markers on their own line — ALWAYS with a title inside: [[CHAPTER: Chapter 1]], [[CHAPTER: Chapter 2]], etc. NEVER write [[CHAPTER:]] with an empty title — if the source has no title, generate one like "Chapter N"
 
 Output ONLY the adapted text, no comments or explanations.`,
       },
@@ -261,7 +261,12 @@ Output ONLY the adapted text, no comments or explanations.`,
     temperature: 0.3,
   });
 
-  return json({ text: result.choices[0].message.content.trim() });
+  // Guard: never let an empty [[CHAPTER:]] through in adapted output
+  let chN = 0;
+  const adaptedText = result.choices[0].message.content.trim()
+    .replace(/\[\[CHAPTER:\s*\]\]/g, () => `[[CHAPTER: Chapter ${++chN}]]`);
+
+  return json({ text: adaptedText });
 }
 
 // ─── Translate ───────────────────────────────────────────────────────────────
@@ -334,7 +339,7 @@ CRITICAL formatting rules:
 - Translate each tagged line into EXACTLY ONE output line, keeping its tag at the start
 - Keep ALL tags in order — one tag per output line, no merging, no splitting
 - Keep blank lines (lines without a tag) exactly where they appear
-- Keep [[CHAPTER: ...]] markers — translate only the chapter name inside them
+- Keep [[CHAPTER: ...]] markers — translate only the chapter name inside them. NEVER output [[CHAPTER:]] with an empty title
 
 Output ONLY the translated tagged lines and blank lines. No notes, no explanations.`,
       },
@@ -344,10 +349,15 @@ Output ONLY the translated tagged lines and blank lines. No notes, no explanatio
   });
 
   // Strip [NNN] tags from every line and return clean translated text
+  let chapterN = 0;
   const translatedLines = result.choices[0].message.content
     .trim()
     .split('\n')
-    .map(line => line.replace(/^\[\d{3}\]\s?/, ''));
+    .map(line => {
+      const clean = line.replace(/^\[\d{3}\]\s?/, '');
+      // Guard: never let an empty [[CHAPTER:]] through
+      return clean.replace(/\[\[CHAPTER:\s*\]\]/g, () => `[[CHAPTER: Chapter ${++chapterN}]]`);
+    });
 
   return json({ text: translatedLines.join('\n') });
 }
@@ -532,7 +542,7 @@ async function batchSubmit(request, env) {
             messages: [
               {
                 role: 'system',
-                content: `You are a professional literary translator. Translate the English text to ${langName}.\n\n${levelInstructions}\n\nName rules (strict):\n- NEVER translate character names — transliterate them to ${langName} phonetically if needed\n- Place names: keep English or use established local equivalents\n- A name must be identical in every level of the same book\n\nCRITICAL formatting rules:\n- Every non-empty input line starts with a tag like [001], [002], etc.\n- Translate each tagged line into EXACTLY ONE output line, keeping its tag at the start\n- Keep ALL tags in order — one tag per output line, no merging, no splitting\n- Keep blank lines (lines without a tag) exactly where they appear\n- Keep [[CHAPTER: ...]] markers — translate only the chapter name inside them\nOutput ONLY the translated tagged lines and blank lines. No notes, no explanations.`,
+                content: `You are a professional literary translator. Translate the English text to ${langName}.\n\n${levelInstructions}\n\nName rules (strict):\n- NEVER translate character names — transliterate them to ${langName} phonetically if needed\n- Place names: keep English or use established local equivalents\n- A name must be identical in every level of the same book\n\nCRITICAL formatting rules:\n- Every non-empty input line starts with a tag like [001], [002], etc.\n- Translate each tagged line into EXACTLY ONE output line, keeping its tag at the start\n- Keep ALL tags in order — one tag per output line, no merging, no splitting\n- Keep blank lines (lines without a tag) exactly where they appear\n- Keep [[CHAPTER: ...]] markers — translate only the chapter name inside them. NEVER output [[CHAPTER:]] with an empty title\nOutput ONLY the translated tagged lines and blank lines. No notes, no explanations.`,
               },
               { role: 'user', content: taggedText },
             ],
