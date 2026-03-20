@@ -3,8 +3,8 @@
 //         /api/structure, /api/detect-level, /api/adapt, /api/translate, /api/describe,
 //         /api/models (POST), /api/generate-cover (POST)
 
-const ADAPT_MODELS     = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'];
-const TRANSLATE_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'];
+const ADAPT_MODELS     = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4.1-nano'];
+const TRANSLATE_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4.1-nano'];
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -92,7 +92,7 @@ export default {
 
 async function getConfig(env) {
   const provider      = await env.KV.get('active_provider')   || 'openai';
-  const adaptModel    = await env.KV.get('adapt_model')        || 'gpt-4o';
+  const adaptModel    = await env.KV.get('adapt_model')        || 'gpt-4.1';
   const translateModel = await env.KV.get('translate_model')   || 'gpt-4o-mini';
   return json({
     provider,
@@ -208,7 +208,7 @@ async function detectLevel(request, env) {
   const { text } = await request.json();
 
   const result = await openai(env.OPENAI_API_KEY, {
-    model: 'gpt-4o',
+    model: 'gpt-4.1-mini',
     messages: [
       {
         role: 'system',
@@ -228,7 +228,7 @@ async function detectLevel(request, env) {
 
 async function adapt(request, env) {
   const { text, fromLevel, toLevel } = await request.json();
-  const model = await env.KV.get('adapt_model') || 'gpt-4o';
+  const model = await env.KV.get('adapt_model') || 'gpt-4.1';
 
   const result = await openai(env.OPENAI_API_KEY, {
     model,

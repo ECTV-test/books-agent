@@ -909,18 +909,20 @@
       <label for="adapt-model-sel">Adaptation</label>
       <select class="model-select" id="adapt-model-sel">
         <option value="gpt-4o-mini">gpt-4o-mini — fast, cheap (~$0.18/book)</option>
-        <option value="gpt-4o" selected>gpt-4o — best quality (~$3/book)</option>
-        <option value="gpt-4.1-mini">gpt-4.1-mini — fast, good</option>
-        <option value="gpt-4.1">gpt-4.1 — top quality</option>
+        <option value="gpt-4o">gpt-4o — high quality (~$3/book)</option>
+        <option value="gpt-4.1" selected>gpt-4.1 ★ recommended (~$2.5/book)</option>
+        <option value="gpt-4.1-mini">gpt-4.1-mini — fast, good (~$0.45/book)</option>
+        <option value="gpt-4.1-nano">gpt-4.1-nano — cheapest (~$0.10/book)</option>
       </select>
     </div>
     <div class="model-row">
       <label for="translate-model-sel">Translation</label>
       <select class="model-select" id="translate-model-sel">
-        <option value="gpt-4o-mini" selected>gpt-4o-mini — recommended (~$1/book)</option>
-        <option value="gpt-4o">gpt-4o — literary quality (~$16/book)</option>
-        <option value="gpt-4.1-mini">gpt-4.1-mini — fast, good</option>
-        <option value="gpt-4.1">gpt-4.1 — top quality</option>
+        <option value="gpt-4.1-nano">gpt-4.1-nano — cheapest (~$0.35/book)</option>
+        <option value="gpt-4o-mini" selected>gpt-4o-mini ★ recommended (~$1/book)</option>
+        <option value="gpt-4.1-mini">gpt-4.1-mini — better quality (~$1.8/book)</option>
+        <option value="gpt-4.1">gpt-4.1 — top quality (~$7/book)</option>
+        <option value="gpt-4o">gpt-4o — legacy (~$16/book)</option>
       </select>
     </div>
 
@@ -945,31 +947,42 @@
 // ─── CONFIG ────────────────────────────────────────────────────────────────
 const WORKER_URL = 'https://books-agent.englishclubsales.workers.dev';
 
-// OpenAI pricing (per 1M tokens), DALL-E 3 per image
-const PRICING = {
-  gpt4o_in:       2.50,   // adapt (GPT-4o)
-  gpt4o_out:     10.00,
-  mini_in:        0.15,   // translate + describe (GPT-4o-mini)
-  mini_out:       0.60,
-  dalle3:         0.04,   // per image, standard quality 1024×1024
-  tokens_per_word: 1.3,   // average tokens per English word
+// OpenAI pricing (per 1M tokens): [input, output]
+const MODEL_PRICES = {
+  'gpt-4o':        [2.50, 10.00],
+  'gpt-4o-mini':   [0.15,  0.60],
+  'gpt-4.1':       [2.00,  8.00],
+  'gpt-4.1-mini':  [0.40,  1.60],
+  'gpt-4.1-nano':  [0.10,  0.40],
 };
+const DALLE3_PRICE   = 0.04;   // per image, standard 1024×1024
+const TOKENS_PER_WORD = 1.3;
+
+function modelPrice(modelId) {
+  return MODEL_PRICES[modelId] || MODEL_PRICES['gpt-4o-mini'];
+}
 
 function estimateCost(wordCount, chaptersCount, langCount, includeImages) {
-  const T = wordCount * PRICING.tokens_per_word;
+  const T = wordCount * TOKENS_PER_WORD;
 
-  // Adaptation: 4 levels (cascade), each ~same size as source, GPT-4o
-  // input ≈ source chapter + prompt overhead, output ≈ adapted chapter
-  const adaptCost = 4 * (T * PRICING.gpt4o_in + T * PRICING.gpt4o_out) / 1_000_000;
+  const adaptModelId     = document.getElementById('adapt-model-sel')?.value     || 'gpt-4.1';
+  const translateModelId = document.getElementById('translate-model-sel')?.value  || 'gpt-4o-mini';
 
-  // Translation: 5 levels × langCount, GPT-4o-mini
-  const translateCost = 5 * langCount * (T * PRICING.mini_in + T * PRICING.mini_out) / 1_000_000;
+  const [aIn, aOut] = modelPrice(adaptModelId);
+  const [tIn, tOut] = modelPrice(translateModelId);
 
-  // Descriptions: (langCount + 1) langs × ~300 tokens in + 150 out
-  const descCost = (langCount + 1) * (300 * PRICING.mini_in + 150 * PRICING.mini_out) / 1_000_000;
+  // Adaptation: 4 levels (cascade), each ~same size as source
+  const adaptCost = 4 * (T * aIn + T * aOut) / 1_000_000;
+
+  // Translation: 5 levels × langCount
+  const translateCost = 5 * langCount * (T * tIn + T * tOut) / 1_000_000;
+
+  // Descriptions: (langCount + 1) langs × ~300 tokens in + 150 out, always gpt-4o-mini
+  const [dIn, dOut] = MODEL_PRICES['gpt-4o-mini'];
+  const descCost = (langCount + 1) * (300 * dIn + 150 * dOut) / 1_000_000;
 
   // Images: 1 per chapter × DALL-E 3 price
-  const imageCost = includeImages ? chaptersCount * PRICING.dalle3 : 0;
+  const imageCost = includeImages ? chaptersCount * DALLE3_PRICE : 0;
 
   return {
     adapt:       adaptCost,
@@ -2993,6 +3006,11 @@ document.getElementById('epub-use-collection-btn').addEventListener('click', () 
   renderCollectionCard(stories, langCount, imgStyle !== 'none');
   updateTitleFromSelection();
   updateCostEstimate();
+});
+
+// Model selects — update cost estimate on change
+['adapt-model-sel','translate-model-sel'].forEach(id => {
+  document.getElementById(id)?.addEventListener('change', updateCostEstimate);
 });
 
 // Admin
