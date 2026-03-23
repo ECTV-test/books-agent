@@ -1555,27 +1555,36 @@ async function runSingleStory(book, settings) {
       ? chapterTexts.original
       : chapterTexts[cascade[cascade.findIndex(c=>c.key===key)-1].key];
 
-    setStep(stepId,'running', `0 / ${n} chapters`);
+    // Split large chapters into sub-chunks (max 2500 words) to avoid
+    // GPT output-token truncation and Cloudflare Worker timeouts.
+    const adaptSubChunks = book.chapters.map((_, i) => splitForAI(sourceTexts[i], 2500));
+    const adaptTasks = [];
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < adaptSubChunks[i].length; j++)
+        adaptTasks.push({ i, j });
+
+    setStep(stepId,'running', `0 / ${adaptTasks.length} chunks`);
     let done = 0;
-    const adapted = new Array(n);
+    const adaptedSubs = Array.from({ length: n }, () => []);
 
     await runBatch(
-      book.chapters.map((_,i) => i),
-      async (i) => {
+      adaptTasks,
+      async ({ i, j }) => {
         const { text } = await apiPost('/api/adapt', {
-          text:      sourceTexts[i],
+          text:      adaptSubChunks[i][j],
           fromLevel: from,
           toLevel:   label,
         });
-        adapted[i] = text;
+        adaptedSubs[i][j] = text;
         done++;
-        setStep(stepId,'running', `${done} / ${n} chapters`);
+        setStep(stepId,'running', `${done} / ${adaptTasks.length} chunks`);
       },
       3
     );
 
+    const adapted = adaptedSubs.map(subs => subs.join('\n\n'));
     chapterTexts[key] = adapted;
-    setStep(stepId,'done', `${n} chapters`);
+    setStep(stepId,'done', `${adaptTasks.length} chunks`);
   }
 
   // ── 5.5 Batch mode: submit translations to OpenAI Batch API ────────────
@@ -1596,33 +1605,49 @@ async function runSingleStory(book, settings) {
   }
 
   // ── 6. Translate all levels × all languages ────────────────────────────
-  const totalTasks = ALL_LEVELS.length * nL * n;
+  // Auto-split large chapters into sub-chunks (max 2500 words each) so we
+  // never hit the Cloudflare Worker 30-second wall-clock timeout or GPT
+  // output-token limits. Sub-chunks are joined back after translation.
+  const subChunksMap = {}; // [lvl][i] → string[]
+  for (const lvl of ALL_LEVELS) {
+    subChunksMap[lvl] = [];
+    for (let i = 0; i < n; i++)
+      subChunksMap[lvl][i] = splitForAI(chapterTexts[lvl][i], 2500);
+  }
+
+  const translatTasks = [];
+  for (const lvl of ALL_LEVELS)
+    for (const lang of settings.languages)
+      for (let i = 0; i < n; i++)
+        for (let j = 0; j < subChunksMap[lvl][i].length; j++)
+          translatTasks.push({ lvl, lang, i, j });
+
+  const totalTasks = translatTasks.length;
   let translatedCount = 0;
   setStep('translate','running', `0 / ${totalTasks} chunks`);
 
   const translations = {};
   for (const lvl of ALL_LEVELS) translations[lvl] = { en: chapterTexts[lvl] };
-
-  const tasks = [];
   for (const lvl of ALL_LEVELS)
     for (const lang of settings.languages)
-      for (let i = 0; i < n; i++)
-        tasks.push({ lvl, lang, i });
+      translations[lvl][lang] = Array.from({ length: n }, () => []);
 
-  for (const lvl of ALL_LEVELS)
-    for (const lang of settings.languages)
-      translations[lvl][lang] = new Array(n);
-
-  await runBatch(tasks, async ({ lvl, lang, i }) => {
+  await runBatch(translatTasks, async ({ lvl, lang, i, j }) => {
     const { text } = await apiPost('/api/translate', {
-      text: chapterTexts[lvl][i],
+      text: subChunksMap[lvl][i][j],
       targetLang: lang,
       level: lvl,
     });
-    translations[lvl][lang][i] = text;
+    translations[lvl][lang][i][j] = text;
     translatedCount++;
     setStep('translate','running', `${translatedCount} / ${totalTasks} chunks`);
   }, 8);
+
+  // Join sub-chunks back per chapter
+  for (const lvl of ALL_LEVELS)
+    for (const lang of settings.languages)
+      for (let i = 0; i < n; i++)
+        translations[lvl][lang][i] = translations[lvl][lang][i].join('\n\n');
 
   setStep('translate','done', `${totalTasks} chunks · ${ALL_LEVELS.length} levels · ${nL} languages`);
 
@@ -2135,6 +2160,27 @@ async function downloadAllCollectionZIP() {
 // ─── PIPELINE HELPERS ──────────────────────────────────────────────────────
 
 // Run tasks array with limited concurrency
+// Split a large text into sub-chunks of ≤ maxWords by paragraph boundaries.
+// Keeps [[CHAPTER:]] markers with their paragraph (never splits them off alone).
+function splitForAI(text, maxWords = 2500) {
+  const paras = text.split(/\n{2,}/);
+  const chunks = [];
+  let cur = [];
+  let wc = 0;
+  for (const p of paras) {
+    const pw = p.split(/\s+/).filter(Boolean).length;
+    if (wc + pw > maxWords && cur.length > 0) {
+      chunks.push(cur.join('\n\n'));
+      cur = [];
+      wc = 0;
+    }
+    cur.push(p);
+    wc += pw;
+  }
+  if (cur.length) chunks.push(cur.join('\n\n'));
+  return chunks.length ? chunks : [text];
+}
+
 async function runBatch(items, fn, concurrency = 3) {
   let idx = 0;
   async function worker() {
