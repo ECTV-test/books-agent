@@ -1352,9 +1352,10 @@ async function parseTXT(file) {
     if (chapters.length) return { title:'', author:'', chapters };
   }
 
-  const chRx = /^(Chapter|CHAPTER|Ch\.)\s+[\dIVXivx]+[^\n]*/m;
+  // Match "CHAPTER I" / "Chapter 1" with optional leading whitespace (e.g. Gutenberg centered text)
+  const chRx = /^\s*(Chapter|CHAPTER|Ch\.)\s+[\dIVXivx]+[^\n]*/m;
   if (chRx.test(text)) {
-    const parts    = text.split(/(?=^(?:Chapter|CHAPTER|Ch\.)\s+[\dIVXivx]+)/m);
+    const parts    = text.split(/(?=^\s*(?:Chapter|CHAPTER|Ch\.)\s+[\dIVXivx]+)/m);
     const chapters = parts.filter(p=>p.trim().length>100).map((p,i)=>{
       const lines = p.split('\n');
       return { title: lines[0].trim()||`Chapter ${i+1}`, content: lines.slice(1).join('\n').trim() };
