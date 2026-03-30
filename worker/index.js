@@ -44,7 +44,7 @@ const LEVEL_PROMPTS = {
 - Maximum 10 words per sentence
 - Use present tense wherever possible
 - Use Subject-Verb-Object structure only
-- After writing each sentence, ask: "Can a complete beginner understand this?" — if not, rewrite it`,
+- Every sentence must be immediately clear to a complete beginner — rewrite any sentence that is not`,
 };
 
 // ─── Router ─────────────────────────────────────────────────────────────────
