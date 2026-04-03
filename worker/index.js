@@ -70,6 +70,7 @@ export default {
       if (pathname === '/api/structure'       && request.method === 'POST') return detectStructure(request, env);
       if (pathname === '/api/detect-level'    && request.method === 'POST') return detectLevel(request, env);
       if (pathname === '/api/adapt'           && request.method === 'POST') return adapt(request, env);
+      if (pathname === '/api/retell'          && request.method === 'POST') return retell(request, env);
       if (pathname === '/api/translate'       && request.method === 'POST') return translate(request, env);
       if (pathname === '/api/describe'        && request.method === 'POST') return describe(request, env);
       if (pathname === '/api/generate-cover'         && request.method === 'POST') return generateCover(request, env);
@@ -227,8 +228,16 @@ async function detectLevel(request, env) {
 // ─── Adapt ───────────────────────────────────────────────────────────────────
 
 async function adapt(request, env) {
-  const { text, fromLevel, toLevel } = await request.json();
+  const { text, fromLevel, toLevel, childrenMode } = await request.json();
   const model = await env.KV.get('adapt_model') || 'gpt-4.1';
+
+  const childrenRules = childrenMode ? `
+
+Children's version rules (apply strictly):
+- Replace or soften all violence and death — use neutral language ("they fought", "he was hurt") instead of graphic descriptions
+- Remove all romantic and sexual content
+- Remove graphic descriptions of suffering or injury
+- Keep: adventure, friendship, character development, moral lessons` : '';
 
   const result = await openai(env.OPENAI_API_KEY, {
     model,
@@ -246,7 +255,7 @@ Content rules:
 - NEVER change character names — keep them exactly as in the original (e.g. "Stuffy Pete" stays "Stuffy Pete")
 - NEVER translate or localize proper nouns — character names, place names, institution names stay in English
 - Preserve the author's tone completely — if the original is humorous, keep the humor; if dramatic, keep the drama
-- Preserve stylistic devices: irony, metaphors, imagery — simplify language but not the style
+- Preserve stylistic devices: irony, metaphors, imagery — simplify language but not the style${childrenRules}
 
 Formatting rules (strict):
 - Each sentence on its own line
@@ -267,6 +276,49 @@ Output ONLY the adapted text, no comments or explanations.`,
     .replace(/\[\[CHAPTER:\s*\]\]/g, () => `[[CHAPTER: Chapter ${++chN}]]`);
 
   return json({ text: adaptedText });
+}
+
+// ─── Retell ──────────────────────────────────────────────────────────────────
+
+async function retell(request, env) {
+  const { text, childrenMode } = await request.json();
+  const model = await env.KV.get('adapt_model') || 'gpt-4.1';
+
+  const childrenRules = childrenMode ? `
+
+Children's version rules (apply strictly):
+- Replace or soften all violence and death — use neutral language ("they fought", "he was hurt") instead of graphic descriptions
+- Remove all romantic and sexual content
+- Remove graphic descriptions of suffering or injury
+- Keep: adventure, friendship, character development, moral lessons` : '';
+
+  const result = await openai(env.OPENAI_API_KEY, {
+    model,
+    messages: [
+      {
+        role: 'system',
+        content: `You are a literary editor. Retell the chapter in neutral, clear prose.
+
+Rules:
+- Target length: 25-30% of the original
+- Keep all major plot events, characters, and essential dialogue
+- Write in plain, neutral style — remove the author's stylistic flourishes
+- Each sentence on its own line
+- One blank line between paragraphs
+- Keep [[CHAPTER: ...]] markers on their own line — ALWAYS with a title inside, NEVER [[CHAPTER:]] empty${childrenRules}
+
+Output ONLY the retold text, no comments or explanations.`,
+      },
+      { role: 'user', content: text },
+    ],
+    temperature: 0.3,
+  });
+
+  let chN = 0;
+  const retoldText = result.choices[0].message.content.trim()
+    .replace(/\[\[CHAPTER:\s*\]\]/g, () => `[[CHAPTER: Chapter ${++chN}]]`);
+
+  return json({ text: retoldText });
 }
 
 // ─── Translate ───────────────────────────────────────────────────────────────

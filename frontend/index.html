@@ -220,6 +220,16 @@
     .ce-item b { color: #1d1d1f; }
 
     /* ── Batch mode toggle ── */
+    .mode-opt {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 12px 14px; border: 2px solid #e5e7eb;
+      border-radius: 10px; cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .mode-opt.selected { border-color: #0071e3; background: #f0f6ff; }
+    .mode-opt input[type=radio] { margin-top: 2px; width: 16px; height: 16px; cursor: pointer; accent-color: #0071e3; flex-shrink: 0; }
+    .mo-name { font-weight: 600; font-size: 14px; color: #1d1d1f; }
+    .mo-desc { font-size: 12px; color: #86868b; margin-top: 2px; }
     .batch-toggle {
       display: flex;
       align-items: center;
@@ -745,6 +755,41 @@
     </div>
   </div>
 
+  <!-- Processing Mode -->
+  <div class="card" id="card-mode" hidden>
+    <h2>Step 5 — Processing Mode</h2>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <label class="mode-opt selected" data-val="adapt">
+        <input type="radio" name="proc-mode" value="adapt" checked>
+        <div>
+          <div class="mo-name">📚 Adapt only</div>
+          <div class="mo-desc">Simplify to B2 / B1 / A2 / A1 levels — standard mode</div>
+        </div>
+      </label>
+      <label class="mode-opt" data-val="retell-adapt">
+        <input type="radio" name="proc-mode" value="retell-adapt">
+        <div>
+          <div class="mo-name">✍️ Retell → Adapt</div>
+          <div class="mo-desc">First condense to ~25% in neutral style, then adapt by levels — best for long books</div>
+        </div>
+      </label>
+      <label class="mode-opt" data-val="retell">
+        <input type="radio" name="proc-mode" value="retell">
+        <div>
+          <div class="mo-name">📝 Retell only</div>
+          <div class="mo-desc">Condensed neutral retelling — download without levels</div>
+        </div>
+      </label>
+    </div>
+    <label style="display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid #e5e7eb;cursor:pointer">
+      <input type="checkbox" id="children-mode-cb" style="width:16px;height:16px;cursor:pointer;accent-color:#0071e3;flex-shrink:0">
+      <div>
+        <div style="font-weight:600;font-size:14px">🧒 Children's version</div>
+        <div style="font-size:12px;color:#86868b;margin-top:2px">Soften violence, remove adult content — suitable for younger readers</div>
+      </div>
+    </label>
+  </div>
+
   <!-- Cost estimate -->
   <div id="cost-estimate" hidden></div>
 
@@ -962,7 +1007,7 @@ function modelPrice(modelId) {
   return MODEL_PRICES[modelId] || MODEL_PRICES['gpt-4o-mini'];
 }
 
-function estimateCost(wordCount, chaptersCount, langCount, includeImages) {
+function estimateCost(wordCount, chaptersCount, langCount, includeImages, retellMode) {
   const T = wordCount * TOKENS_PER_WORD;
 
   const adaptModelId     = document.getElementById('adapt-model-sel')?.value     || 'gpt-4.1';
@@ -971,25 +1016,35 @@ function estimateCost(wordCount, chaptersCount, langCount, includeImages) {
   const [aIn, aOut] = modelPrice(adaptModelId);
   const [tIn, tOut] = modelPrice(translateModelId);
 
-  // Adaptation: 4 levels (cascade), each ~same size as source
-  const adaptCost = 4 * (T * aIn + T * aOut) / 1_000_000;
+  // Retell: 1 pass at ~30% output ratio
+  const retellCost = (retellMode !== 'adapt')
+    ? (T * aIn + T * 0.3 * aOut) / 1_000_000
+    : 0;
 
-  // Translation: 5 levels × langCount
-  const translateCost = 5 * langCount * (T * tIn + T * tOut) / 1_000_000;
+  // Adaptation: 4 levels (cascade); skip if retell-only
+  const adaptLevels = retellMode === 'retell' ? 0 : 4;
+  const adaptT = retellMode === 'retell-adapt' ? T * 0.3 : T; // base text is ~30% after retell
+  const adaptCost = adaptLevels * (adaptT * aIn + adaptT * aOut) / 1_000_000;
 
-  // Descriptions: (langCount + 1) langs × ~300 tokens in + 150 out, always gpt-4o-mini
+  // Translation: 5 levels × langCount (1 level for retell-only)
+  const transLevels = retellMode === 'retell' ? 1 : 5;
+  const transT = retellMode === 'retell-adapt' ? T * 0.3 : T;
+  const translateCost = transLevels * langCount * (transT * tIn + transT * tOut) / 1_000_000;
+
+  // Descriptions: always gpt-4o-mini
   const [dIn, dOut] = MODEL_PRICES['gpt-4o-mini'];
   const descCost = (langCount + 1) * (300 * dIn + 150 * dOut) / 1_000_000;
 
-  // Images: 1 per chapter × DALL-E 3 price
+  // Images: 1 per chapter
   const imageCost = includeImages ? chaptersCount * DALLE3_PRICE : 0;
 
   return {
+    retell:      retellCost,
     adapt:       adaptCost,
     translate:   translateCost,
     desc:        descCost,
     images:      imageCost,
-    total:       adaptCost + translateCost + descCost + imageCost,
+    total:       retellCost + adaptCost + translateCost + descCost + imageCost,
   };
 }
 
@@ -1018,7 +1073,12 @@ function updateCostEstimate() {
     label    = `${words.toLocaleString()} words · ${chapters} chapters`;
   }
 
-  const c = estimateCost(words, chapters, langCount, includeImages);
+  const retellMode = document.querySelector('input[name="proc-mode"]:checked')?.value || 'adapt';
+  const c = estimateCost(words, chapters, langCount, includeImages, retellMode);
+
+  const retellItem  = c.retell  > 0 ? `<span class="ce-item">✍️ Retell <b>$${c.retell.toFixed(2)}</b></span>` : '';
+  const adaptItem   = c.adapt   > 0 ? `<span class="ce-item">⚡ Adapt <b>$${c.adapt.toFixed(2)}</b></span>`  : '';
+  const modeLabel   = retellMode === 'retell' ? ' · Retell only' : retellMode === 'retell-adapt' ? ' · Retell→Adapt' : '';
 
   el.innerHTML = `
     <div>
@@ -1026,8 +1086,9 @@ function updateCostEstimate() {
     </div>
     <div class="ce-total">~$${c.total.toFixed(2)}</div>
     <div class="ce-breakdown">
-      <span class="ce-item">📖 <b>${label}</b></span>
-      <span class="ce-item">⚡ Adapt <b>$${c.adapt.toFixed(2)}</b></span>
+      <span class="ce-item">📖 <b>${label}${modeLabel}</b></span>
+      ${retellItem}
+      ${adaptItem}
       <span class="ce-item">🌍 Translate ×${langCount} <b>$${c.translate.toFixed(2)}</b></span>
       ${includeImages ? `<span class="ce-item">🎨 Images ×${chapters} <b>$${c.images.toFixed(2)}</b></span>` : ''}
     </div>
@@ -1411,7 +1472,7 @@ async function handleFile(file) {
     }
 
     // Show base UI (languages, options needed before structure detection cost calc)
-    show('card-langs'); show('card-options'); updateBatchToggleVisibility(); loadBatchJobs();
+    show('card-langs'); show('card-options'); show('card-mode'); updateBatchToggleVisibility(); loadBatchJobs();
 
     // Structure detection for TXT without clear chapters
     if (book.needsStructureDetection && book.rawText) {
@@ -1474,6 +1535,22 @@ const LEVEL_ORDER = ['C2','C1','B2','B1','A2','A1'];
 const LEVEL_KEY   = { B2:'b2', B1:'b1', A2:'a2', A1:'a1' };
 const ALL_LEVELS  = ['original','b2','b1','a2','a1'];
 
+function buildPipelineSteps(retellMode) {
+  const steps = [{ id:'detect', label:'Detecting original level' }];
+  if (retellMode !== 'adapt') steps.push({ id:'retell', label: retellMode === 'retell' ? 'Retelling' : 'Retelling (condensing)' });
+  steps.push(
+    { id:'adapt-b2',  label:'Adapting → B2' },
+    { id:'adapt-b1',  label:'Adapting → B1' },
+    { id:'adapt-a2',  label:'Adapting → A2' },
+    { id:'adapt-a1',  label:'Adapting → A1' },
+    { id:'translate', label:'Translating' },
+    { id:'metadata',  label:'Generating descriptions' },
+    { id:'images',    label:'Generating chapter images' },
+    { id:'pack',      label:'Packaging result' },
+  );
+  return steps;
+}
+
 const PIPELINE_STEPS = [
   { id:'detect',    label:'Detecting original level' },
   { id:'adapt-b2',  label:'Adapting → B2' },
@@ -1487,7 +1564,7 @@ const PIPELINE_STEPS = [
 ];
 
 async function runPipeline(book, settings) {
-  renderSteps(PIPELINE_STEPS);
+  renderSteps(buildPipelineSteps(settings.retellMode || 'adapt'));
   show('card-progress');
   document.getElementById('card-progress').scrollIntoView({ behavior:'smooth' });
 
@@ -1531,11 +1608,48 @@ async function runSingleStory(book, settings) {
   book.detectedLevel = detectedLevel;
   setStep('detect','done', `Detected: ${detectedLevel}`);
 
-  // ── 2-5. Cascade adaptation ────────────────────────────────────────────
+  // ── 1.5. Retell (if retellMode !== 'adapt') ────────────────────────────
+  const retellMode   = settings.retellMode   || 'adapt';
+  const childrenMode = settings.childrenMode || false;
+
   const chapterTexts = {
     original: book.chapters.map(c => `[[CHAPTER: ${c.title}]]\n\n${c.content}`),
   };
 
+  if (retellMode !== 'adapt') {
+    const retellSubs = chapterTexts.original.map(t => splitForAI(t, 2500));
+    const retellTasks = [];
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < retellSubs[i].length; j++)
+        retellTasks.push({ i, j });
+
+    setStep('retell', 'running', `0 / ${retellTasks.length} chunks`);
+    let retellDone = 0;
+    const retelledSubs = Array.from({ length: n }, () => []);
+
+    await runBatch(retellTasks, async ({ i, j }) => {
+      const { text } = await apiPost('/api/retell', {
+        text: retellSubs[i][j],
+        childrenMode,
+      });
+      retelledSubs[i][j] = text;
+      retellDone++;
+      setStep('retell', 'running', `${retellDone} / ${retellTasks.length} chunks`);
+    }, 3);
+
+    chapterTexts.original = retelledSubs.map(subs => subs.join('\n\n'));
+    setStep('retell', 'done', `${retellTasks.length} chunks · ~25% of original`);
+  }
+
+  // For retell-only: skip cascade, mark adapt steps as skipped
+  if (retellMode === 'retell') {
+    for (const key of ['b2','b1','a2','a1']) {
+      chapterTexts[key] = chapterTexts.original;
+      setStep(`adapt-${key}`, 'done', 'Skipped (retell only)');
+    }
+  }
+
+  // ── 2-5. Cascade adaptation ────────────────────────────────────────────
   const cascade = [
     { key:'b2', label:'B2', from: detectedLevel },
     { key:'b1', label:'B1', from:'B2' },
@@ -1545,6 +1659,9 @@ async function runSingleStory(book, settings) {
 
   for (const { key, label, from } of cascade) {
     const stepId = `adapt-${key}`;
+
+    // retell-only: adapt steps already marked skipped above
+    if (retellMode === 'retell') continue;
 
     if (LEVEL_ORDER.indexOf(label) <= LEVEL_ORDER.indexOf(detectedLevel)) {
       chapterTexts[key] = chapterTexts.original;
@@ -1556,8 +1673,6 @@ async function runSingleStory(book, settings) {
       ? chapterTexts.original
       : chapterTexts[cascade[cascade.findIndex(c=>c.key===key)-1].key];
 
-    // Split large chapters into sub-chunks (max 2500 words) to avoid
-    // GPT output-token truncation and Cloudflare Worker timeouts.
     const adaptSubChunks = book.chapters.map((_, i) => splitForAI(sourceTexts[i], 2500));
     const adaptTasks = [];
     for (let i = 0; i < n; i++)
@@ -1575,6 +1690,7 @@ async function runSingleStory(book, settings) {
           text:      adaptSubChunks[i][j],
           fromLevel: from,
           toLevel:   label,
+          childrenMode,
         });
         adaptedSubs[i][j] = text;
         done++;
@@ -1606,18 +1722,17 @@ async function runSingleStory(book, settings) {
   }
 
   // ── 6. Translate all levels × all languages ────────────────────────────
-  // Auto-split large chapters into sub-chunks (max 2500 words each) so we
-  // never hit the Cloudflare Worker 30-second wall-clock timeout or GPT
-  // output-token limits. Sub-chunks are joined back after translation.
+  const activeLevels = retellMode === 'retell' ? ['original'] : ALL_LEVELS;
+
   const subChunksMap = {}; // [lvl][i] → string[]
-  for (const lvl of ALL_LEVELS) {
+  for (const lvl of activeLevels) {
     subChunksMap[lvl] = [];
     for (let i = 0; i < n; i++)
       subChunksMap[lvl][i] = splitForAI(chapterTexts[lvl][i], 2500);
   }
 
   const translatTasks = [];
-  for (const lvl of ALL_LEVELS)
+  for (const lvl of activeLevels)
     for (const lang of settings.languages)
       for (let i = 0; i < n; i++)
         for (let j = 0; j < subChunksMap[lvl][i].length; j++)
@@ -1628,8 +1743,8 @@ async function runSingleStory(book, settings) {
   setStep('translate','running', `0 / ${totalTasks} chunks`);
 
   const translations = {};
-  for (const lvl of ALL_LEVELS) translations[lvl] = { en: chapterTexts[lvl] };
-  for (const lvl of ALL_LEVELS)
+  for (const lvl of activeLevels) translations[lvl] = { en: chapterTexts[lvl] };
+  for (const lvl of activeLevels)
     for (const lang of settings.languages)
       translations[lvl][lang] = Array.from({ length: n }, () => []);
 
@@ -1645,12 +1760,12 @@ async function runSingleStory(book, settings) {
   }, 8);
 
   // Join sub-chunks back per chapter
-  for (const lvl of ALL_LEVELS)
+  for (const lvl of activeLevels)
     for (const lang of settings.languages)
       for (let i = 0; i < n; i++)
         translations[lvl][lang][i] = translations[lvl][lang][i].join('\n\n');
 
-  setStep('translate','done', `${totalTasks} chunks · ${ALL_LEVELS.length} levels · ${nL} languages`);
+  setStep('translate','done', `${totalTasks} chunks · ${activeLevels.length} levels · ${nL} languages`);
 
   // ── 7. Descriptions ────────────────────────────────────────────────────
   setStep('metadata','running');
@@ -1704,7 +1819,7 @@ async function runSingleStory(book, settings) {
   setStep('pack','running');
 
   const levels = {};
-  for (const lvl of ALL_LEVELS) {
+  for (const lvl of activeLevels) {
     levels[lvl] = {};
     for (const lang of ['en', ...settings.languages]) {
       if (translations[lvl][lang]) {
@@ -1722,6 +1837,8 @@ async function runSingleStory(book, settings) {
       languages:     settings.languages,
       imageStyle:    settings.imageStyle,
       chaptersCount: n,
+      activeLevels,
+      retellMode,
     },
     levels,
     descriptions,
@@ -1880,7 +1997,7 @@ async function runCollectionPipeline(stories, author, settings) {
       wordCount: story.wordCount,
     };
 
-    renderSteps(PIPELINE_STEPS);
+    renderSteps(buildPipelineSteps(settings.retellMode || 'adapt'));
 
     try {
       const pipelineResult = await runSingleStory(storyBook, settings);
@@ -2591,7 +2708,7 @@ async function buildZIPBlob(r, coverOverride = null) {
     title:             r.meta.title,
     author:            r.meta.author,
     original_language: 'en',
-    levels:            ['original','b2','b1','a2','a1'],
+    levels:            r.meta.activeLevels || ['original','b2','b1','a2','a1'],
     languages:         ['en', ...r.meta.languages],
   };
   root.file('book.json', JSON.stringify(bookJson, null, 2));
@@ -2942,7 +3059,7 @@ document.getElementById('fp-remove').addEventListener('click', ()=>{
   document.getElementById('epub-collection-banner').hidden = true;
   resetCoverPreview();
   resetDropZone();
-  ['card-collection','card-info','card-langs','card-options','cost-estimate',
+  ['card-collection','card-info','card-langs','card-options','card-mode','cost-estimate',
    'run-btn','batch-toggle','card-batch-jobs','card-progress','card-results','card-viewer'].forEach(hide);
 });
 
@@ -2974,7 +3091,9 @@ document.getElementById('run-btn').addEventListener('click', async ()=>{
   const languages = [...document.querySelectorAll('input[name="lang"]:checked')].map(c=>c.value);
   if (!languages.length) { alert('Select at least one language'); return; }
   const imageStyle = document.querySelector('input[name="img-style"]:checked').value;
-  const batchMode  = document.getElementById('batch-mode-cb')?.checked ?? false;
+  const batchMode    = document.getElementById('batch-mode-cb')?.checked ?? false;
+  const retellMode   = document.querySelector('input[name="proc-mode"]:checked')?.value || 'adapt';
+  const childrenMode = document.getElementById('children-mode-cb')?.checked ?? false;
   const author = document.getElementById('book-author').value.trim();
   const btn = document.getElementById('run-btn');
   btn.disabled = true; btn.textContent = '⏳ Processing…';
@@ -2988,13 +3107,13 @@ document.getElementById('run-btn').addEventListener('click', async ()=>{
     });
     const selected = getSelectedStories();
     if (!selected.length) { alert('Select at least one story'); btn.disabled=false; btn.textContent='🚀 Start Processing'; return; }
-    await runCollectionPipeline(selected, author, { languages, imageStyle, batchMode });
+    await runCollectionPipeline(selected, author, { languages, imageStyle, batchMode, retellMode, childrenMode });
   } else {
     const title = document.getElementById('book-title').value.trim();
     if (!title) { alert('Enter book title'); btn.disabled=false; btn.textContent='🚀 Start Processing'; return; }
     parsedBook.title  = title;
     parsedBook.author = author;
-    await runPipeline(parsedBook, { languages, imageStyle, batchMode });
+    await runPipeline(parsedBook, { languages, imageStyle, batchMode, retellMode, childrenMode });
   }
 });
 
@@ -3059,6 +3178,18 @@ document.getElementById('epub-use-collection-btn').addEventListener('click', () 
 ['adapt-model-sel','translate-model-sel'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', updateCostEstimate);
 });
+
+// Processing mode radios — highlight selected + update cost
+document.querySelectorAll('input[name="proc-mode"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('.mode-opt').forEach(el => el.classList.remove('selected'));
+    radio.closest('.mode-opt')?.classList.add('selected');
+    updateCostEstimate();
+  });
+});
+
+// Children's mode checkbox — update cost
+document.getElementById('children-mode-cb')?.addEventListener('change', updateCostEstimate);
 
 // Admin
 document.getElementById('admin-btn').addEventListener('click', openAdmin);
